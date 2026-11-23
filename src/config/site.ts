@@ -12,8 +12,12 @@ export interface NavLink {
 }
 
 export interface SiteConfig {
-  /** Shown in the header, page titles and emails. */
+  /** The business behind the site. Shown in the header, footer and page titles. */
+  owner: string;
+  /** What this app is called, e.g. "Client Portal". Shown next to the owner. */
   name: string;
+  /** One line on what the business does, shown on the home page. */
+  description: string;
   /** One-line description used on the home page and in meta tags. */
   tagline: string;
   /** Public contact address shown to clients. */
@@ -31,11 +35,13 @@ export interface SiteConfig {
   nav: NavLink[];
 }
 
-const contactEmail = 'hello@example.com';
+const contactEmail = 'patrick@patrickgodbey.com';
 
 export const site: SiteConfig = {
+  owner: 'Patrick Godbey',
   name: 'Client Portal',
-  tagline: 'Projects, tasks and invoices in one place.',
+  tagline: 'Project progress, conversations and invoices, all in one place.',
+  description: 'Software development consulting for the people making technology decisions.',
   contactEmail,
   colors: {
     brand: '#1e293b', // slate-800

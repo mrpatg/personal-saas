@@ -9,7 +9,8 @@ interface Props {
 }
 
 const { title, description = site.tagline } = Astro.props;
-const fullTitle = title ? `${title} · ${site.name}` : site.name;
+const siteTitle = `${site.owner} ${site.name}`;
+const fullTitle = title ? `${title} · ${siteTitle}` : siteTitle;
 const brandVars = [
   `--site-brand: ${site.colors.brand}`,
   `--site-brand-foreground: ${site.colors.brandForeground}`,
@@ -30,7 +31,10 @@ const year = new Date().getFullYear();
   <body class="flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased">
     <header class="bg-brand text-brand-foreground">
       <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
-        <a href="/" class="text-lg font-semibold">{site.name}</a>
+        <a href="/" class="flex items-baseline gap-2">
+          <span class="text-lg font-semibold">{site.owner}</span>
+          <span class="text-sm opacity-75">{site.name}</span>
+        </a>
         <nav class="flex gap-6 text-sm">
           {site.nav.map((link) => (
             <a href={link.href} class="opacity-90 hover:opacity-100 hover:underline">
@@ -46,7 +50,8 @@ const year = new Date().getFullYear();
     </main>
 
     <footer class="border-t border-slate-200 py-6 text-center text-sm text-slate-500">
-      © {year} {site.name} ·
+      © {year} {site.owner}
+      <span aria-hidden="true" class="mx-1">·</span>
       <a href={`mailto:${site.contactEmail}`} class="hover:underline">{site.contactEmail}</a>
     </footer>
   </body>

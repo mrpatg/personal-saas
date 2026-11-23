@@ -5,8 +5,10 @@ import { site } from '../config/site';
 
 <BaseLayout>
   <section class="mx-auto max-w-2xl py-16 text-center">
-    <h1 class="text-4xl font-bold tracking-tight sm:text-5xl">{site.name}</h1>
+    <p class="text-sm font-medium uppercase tracking-wide text-accent">{site.owner}</p>
+    <h1 class="mt-2 text-4xl font-bold tracking-tight sm:text-5xl">{site.name}</h1>
     <p class="mt-4 text-lg text-slate-600">{site.tagline}</p>
+    <p class="mt-2 text-slate-500">{site.description}</p>
     <div class="mt-8 flex justify-center gap-4">
       <a
         href={`mailto:${site.contactEmail}`}
