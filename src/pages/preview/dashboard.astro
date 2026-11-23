@@ -1,0 +1,116 @@
+---
+/** Design preview: client dashboard with sample data. */
+import AppLayout from '../../layouts/AppLayout.astro';
+import Card from '../../components/ui/Card.astro';
+import Button from '../../components/ui/Button.astro';
+import StatusBadge from '../../components/ui/StatusBadge.astro';
+import {
+  sampleUser, sampleProjects, sampleInvoices, taskStatus, invoiceStatus, money, previewNav, previewNotice,
+} from '../../data/sample';
+
+const due = sampleInvoices.filter((i) => i.status === 'open' || i.status === 'overdue');
+const dueTotal = due.reduce((s, i) => s + i.amount, 0);
+const openTasks = sampleProjects.flatMap((p) => p.tasks).filter((t) => t.status !== 'done').length;
+const firstName = sampleUser.name.split(' ')[0];
+---
+
+<AppLayout title="Overview" nav={previewNav} active="/preview/dashboard" user={sampleUser} notice={previewNotice}>
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <p class="text-sm text-muted">Good afternoon,</p>
+      <h1 class="font-display text-4xl sm:text-5xl">{firstName}</h1>
+    </div>
+    <Button href="#messages" variant="secondary">Send a message</Button>
+  </div>
+
+  <!-- Summary -->
+  <div class="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+    <Card>
+      <p class="text-sm text-muted">Active projects</p>
+      <p class="mt-2 font-display text-4xl">{sampleProjects.length}</p>
+    </Card>
+    <Card>
+      <p class="text-sm text-muted">Open tasks</p>
+      <p class="mt-2 font-display text-4xl">{openTasks}</p>
+    </Card>
+    <Card class="col-span-2 bg-primary! text-primary-foreground ring-0! sm:col-span-1">
+      <p class="text-sm opacity-80">Balance due</p>
+      <div class="mt-2 flex items-end justify-between gap-3">
+        <p class="font-display text-4xl">{money(dueTotal)}</p>
+        <a href="/preview/invoice" class="rounded-full bg-primary-foreground px-4 py-2 text-sm font-medium text-primary transition hover:opacity-90">Pay now</a>
+      </div>
+    </Card>
+  </div>
+
+  <!-- Projects -->
+  <section id="projects" class="mt-12 scroll-mt-24">
+    <h2 class="font-display text-3xl">Projects</h2>
+    <div class="mt-5 grid gap-5 xl:grid-cols-2">
+      {sampleProjects.map((p) => (
+        <Card>
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h3 class="text-lg font-semibold tracking-tight">{p.name}</h3>
+              <p class="mt-1 text-sm leading-relaxed text-muted">{p.summary}</p>
+            </div>
+            <span class="shrink-0 text-sm font-medium text-primary">{p.progress}%</span>
+          </div>
+          <div class="mt-5 h-1.5 overflow-hidden rounded-full bg-line">
+            <div class="h-full rounded-full bg-primary" style={`width: ${p.progress}%`}></div>
+          </div>
+          <p class="mt-2 text-xs text-muted">Target: {p.due}</p>
+          <ul class="mt-5 divide-y divide-line">
+            {p.tasks.map((t) => (
+              <li class="flex items-center justify-between gap-3 py-3 text-sm">
+                <span class={t.status === 'done' ? 'text-muted line-through decoration-line' : ''}>{t.title}</span>
+                <StatusBadge tone={taskStatus[t.status].tone}>{taskStatus[t.status].label}</StatusBadge>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ))}
+    </div>
+  </section>
+
+  <!-- Invoices -->
+  <section class="mt-12">
+    <div class="flex items-center justify-between">
+      <h2 class="font-display text-3xl">Invoices</h2>
+      <a href="/preview/invoice" class="text-sm text-primary hover:underline">View all</a>
+    </div>
+    <Card class="mt-5" padded={false}>
+      <ul class="divide-y divide-line">
+        {sampleInvoices.map((inv) => (
+          <li>
+            <a href="/preview/invoice" class="flex items-center justify-between gap-4 px-5 py-4 transition hover:bg-primary-soft/50 sm:px-7">
+              <div class="min-w-0">
+                <p class="truncate font-medium">{inv.title}</p>
+                <p class="text-xs text-muted">{inv.id} · Due {inv.due}</p>
+              </div>
+              <div class="flex shrink-0 items-center gap-3">
+                <span class="hidden sm:inline"><StatusBadge tone={invoiceStatus[inv.status].tone}>{invoiceStatus[inv.status].label}</StatusBadge></span>
+                <span class="font-medium tabular-nums">{money(inv.amount)}</span>
+              </div>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  </section>
+
+  <!-- Messages -->
+  <section id="messages" class="mt-12 scroll-mt-24">
+    <h2 class="font-display text-3xl">Latest update</h2>
+    <Card class="mt-5">
+      <div class="flex gap-4">
+        <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary font-display text-primary-foreground">PG</span>
+        <div>
+          <p class="text-sm"><span class="font-medium">Patrick</span> <span class="text-muted">· 2 hours ago</span></p>
+          <p class="mt-1.5 leading-relaxed">
+            The scheduling integration is connected in staging. I'd like 20 minutes with your front desk lead this week to walk through check-in before we launch.
+          </p>
+        </div>
+      </div>
+    </Card>
+  </section>
+</AppLayout>

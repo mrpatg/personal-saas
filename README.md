@@ -8,7 +8,7 @@ all branding lives in [`src/config/site.ts`](src/config/site.ts).
 
 ## Prerequisites
 
-- Node.js 22 or newer
+- Node.js 22.23.4 or newer (24 recommended; pinned in `.node-version`)
 - A free [Cloudflare account](https://dash.cloudflare.com/sign-up) (only needed to deploy)
 
 ## Local setup

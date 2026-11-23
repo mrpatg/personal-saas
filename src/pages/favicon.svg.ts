@@ -9,8 +9,8 @@ const escape = (s: string) =>
 
 export const GET: APIRoute = () => {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="6" fill="${escape(site.colors.accent)}"/>
-  <text x="16" y="21.5" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="${site.monogram.length > 2 ? 11 : 14}" font-weight="700" fill="#ffffff">${escape(site.monogram)}</text>
+  <rect width="32" height="32" rx="6" fill="${escape(site.colors.primary)}"/>
+  <text x="16" y="21.5" text-anchor="middle" font-family="Georgia, Times New Roman, serif" font-size="${site.monogram.length > 2 ? 11 : 14}" font-weight="400" fill="${escape(site.colors.primaryForeground)}">${escape(site.monogram)}</text>
 </svg>`;
   return new Response(svg, { headers: { 'content-type': 'image/svg+xml' } });
 };
