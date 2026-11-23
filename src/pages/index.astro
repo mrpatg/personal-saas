@@ -1,0 +1,19 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { site } from '../config/site';
+---
+
+<BaseLayout>
+  <section class="mx-auto max-w-2xl py-16 text-center">
+    <h1 class="text-4xl font-bold tracking-tight sm:text-5xl">{site.name}</h1>
+    <p class="mt-4 text-lg text-slate-600">{site.tagline}</p>
+    <div class="mt-8 flex justify-center gap-4">
+      <a
+        href={`mailto:${site.contactEmail}`}
+        class="rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:opacity-90"
+      >
+        Get in touch
+      </a>
+    </div>
+  </section>
+</BaseLayout>

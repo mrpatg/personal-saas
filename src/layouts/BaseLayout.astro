@@ -1,0 +1,53 @@
+---
+import '../styles/global.css';
+import { site } from '../config/site';
+
+interface Props {
+  /** Page title; the site name is appended automatically. */
+  title?: string;
+  description?: string;
+}
+
+const { title, description = site.tagline } = Astro.props;
+const fullTitle = title ? `${title} · ${site.name}` : site.name;
+const brandVars = [
+  `--site-brand: ${site.colors.brand}`,
+  `--site-brand-foreground: ${site.colors.brandForeground}`,
+  `--site-accent: ${site.colors.accent}`,
+].join('; ');
+const year = new Date().getFullYear();
+---
+
+<!doctype html>
+<html lang="en" style={brandVars}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{fullTitle}</title>
+  </head>
+  <body class="flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased">
+    <header class="bg-brand text-brand-foreground">
+      <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
+        <a href="/" class="text-lg font-semibold">{site.name}</a>
+        <nav class="flex gap-6 text-sm">
+          {site.nav.map((link) => (
+            <a href={link.href} class="opacity-90 hover:opacity-100 hover:underline">
+              {link.label}
+            </a>
+          ))}
+        </nav>
+      </div>
+    </header>
+
+    <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-12">
+      <slot />
+    </main>
+
+    <footer class="border-t border-slate-200 py-6 text-center text-sm text-slate-500">
+      © {year} {site.name} ·
+      <a href={`mailto:${site.contactEmail}`} class="hover:underline">{site.contactEmail}</a>
+    </footer>
+  </body>
+</html>

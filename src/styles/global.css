@@ -1,1 +1,12 @@
 @import "tailwindcss";
+
+/*
+ * Brand colors come from src/config/site.ts. BaseLayout sets the
+ * --site-* variables on <html>; these lines expose them to Tailwind as
+ * bg-brand, text-brand-foreground, text-accent, etc.
+ */
+@theme inline {
+  --color-brand: var(--site-brand);
+  --color-brand-foreground: var(--site-brand-foreground);
+  --color-accent: var(--site-accent);
+}
