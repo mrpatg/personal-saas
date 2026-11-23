@@ -81,8 +81,10 @@ Health check: `GET /health` returns `{"status":"ok","db":"ok","migrated":true}`.
   Settings → Builds). Build command `npm run build`; deploy command
   `npx wrangler d1 migrations apply DB --remote && npx wrangler deploy`.
   Every push to `main` deploys, so keep `main` working.
-- The adapter auto-adds a `SESSION` KV namespace (Astro sessions) and an
-  `IMAGES` binding (image optimization); Wrangler provisions them on first deploy.
+- Astro sessions are disabled (`session: false` in astro.config.mjs) because
+  the adapter's auto-provisioned `SESSION` KV binding breaks preview
+  (non-`main`) builds. Auth keeps its own sessions in D1.
+- The adapter auto-adds an `IMAGES` binding (image optimization).
 - The D1 `database_id` in `wrangler.jsonc` must be the real id from
   `npx wrangler d1 create`.
 
