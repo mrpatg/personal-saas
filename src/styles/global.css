@@ -1,12 +1,44 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/instrument-serif/400-italic.css";
 
 /*
- * Brand colors come from src/config/site.ts. BaseLayout sets the
- * --site-* variables on <html>; these lines expose them to Tailwind as
- * bg-brand, text-brand-foreground, text-accent, etc.
+ * Theme tokens. Colors come from src/config/site.ts: BaseLayout sets the
+ * --site-* variables on <html>, and these lines expose them to Tailwind
+ * (bg-primary, text-ink, bg-canvas, border-line, ...).
  */
 @theme inline {
-  --color-brand: var(--site-brand);
-  --color-brand-foreground: var(--site-brand-foreground);
-  --color-accent: var(--site-accent);
+  --color-primary: var(--site-primary);
+  --color-primary-foreground: var(--site-primary-foreground);
+  --color-canvas: var(--site-canvas);
+  --color-ink: var(--site-ink);
+  --color-muted: color-mix(in oklab, var(--site-ink) 62%, var(--site-canvas));
+  --color-line: color-mix(in oklab, var(--site-ink) 11%, var(--site-canvas));
+  --color-surface: color-mix(in oklab, white 70%, var(--site-canvas));
+  --color-primary-soft: color-mix(in oklab, var(--site-primary) 10%, var(--site-canvas));
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Instrument Serif", ui-serif, Georgia, serif;
+
+  --shadow-soft: 0 1px 2px rgb(20 30 25 / 0.04), 0 8px 24px -8px rgb(20 30 25 / 0.08);
+  --shadow-lift: 0 2px 4px rgb(20 30 25 / 0.05), 0 18px 40px -12px rgb(20 30 25 / 0.16);
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+  body {
+    font-feature-settings: "cv11", "ss01";
+  }
+  :focus-visible {
+    outline: 2px solid var(--site-primary);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
 }

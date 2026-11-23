@@ -1,0 +1,20 @@
+---
+/** Small pill showing a status. Tones map status meaning to color. */
+import type { Tone } from './tones';
+interface Props {
+  tone?: Tone;
+}
+const { tone = 'neutral' } = Astro.props;
+const tones: Record<Tone, string> = {
+  neutral: 'bg-ink/5 text-muted',
+  progress: 'bg-primary-soft text-primary',
+  success: 'bg-emerald-50 text-emerald-800',
+  warning: 'bg-amber-50 text-amber-800',
+  danger: 'bg-rose-50 text-rose-800',
+};
+---
+
+<span class={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${tones[tone]}`}>
+  <span class="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden="true"></span>
+  <slot />
+</span>

@@ -1,0 +1,43 @@
+---
+/** Public pages: home, contact, etc. */
+import BaseLayout from './BaseLayout.astro';
+import Logo from '../components/Logo.astro';
+import Button from '../components/ui/Button.astro';
+import { site } from '../config/site';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+const props = Astro.props;
+const year = new Date().getFullYear();
+---
+
+<BaseLayout {...props}>
+  <div class="flex min-h-dvh flex-col">
+    <header class="sticky top-0 z-30 border-b border-line/70 bg-canvas/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
+        <Logo />
+        <nav class="flex items-center gap-1 sm:gap-2">
+          {site.nav.map((link) => (
+            <a href={link.href} class="hidden rounded-full px-4 py-2 text-sm text-muted transition hover:bg-primary-soft hover:text-ink sm:inline-flex">
+              {link.label}
+            </a>
+          ))}
+          <Button href={site.cta.href} size="sm" class="ml-1">{site.cta.label}</Button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="flex-1">
+      <slot />
+    </main>
+
+    <footer class="border-t border-line">
+      <div class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-5 py-8 text-sm text-muted sm:flex-row sm:px-8">
+        <p>© {year} {site.owner}</p>
+        <a href={`mailto:${site.contactEmail}`} class="transition hover:text-primary">{site.contactEmail}</a>
+      </div>
+    </footer>
+  </div>
+</BaseLayout>

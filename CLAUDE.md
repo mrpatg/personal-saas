@@ -22,9 +22,10 @@ future SaaS sites, so **nothing business-specific is hardcoded** outside
 
 ```
 src/
-  config/site.ts      # ALL branding: owner, monogram, name, tagline, description, contact email, colors, nav
-  layouts/            # Page shells (BaseLayout reads site.ts)
-  components/         # Reusable UI pieces
+  config/site.ts      # ALL branding: owner, monogram, name, copy, contact email, colors, nav, home page text
+  layouts/            # BaseLayout (html shell + theme), PublicLayout (marketing), AppLayout (signed-in: sidebar + mobile tab bar)
+  components/         # Logo, and ui/ primitives: Button (pill), Card, StatusBadge
+  data/sample.ts      # Fake data for /preview/* design pages; delete once real data exists
   pages/              # Routes. .astro = pages, .ts = API endpoints (e.g. health.ts)
   db/schema.ts        # Drizzle table definitions (single source of truth for the schema)
   db/index.ts         # getDb(): Drizzle client bound to env.DB
@@ -38,8 +39,13 @@ drizzle.config.ts     # drizzle-kit config
 ## Conventions
 
 - **Config-driven branding.** Read the site name, copy, contact email, colors
-  and nav from `src/config/site.ts`. Use Tailwind tokens `bg-brand`,
-  `text-brand-foreground`, `bg-accent`/`text-accent` instead of hardcoded brand colors.
+  and nav from `src/config/site.ts`. Use theme tokens instead of raw colors:
+  `primary`, `primary-foreground`, `primary-soft`, `canvas`, `surface`, `ink`,
+  `muted`, `line` (e.g. `bg-primary`, `text-muted`, `ring-line`).
+- **Visual style:** upscale and soft. Warm ivory canvas, forest-green primary,
+  `font-display` (Instrument Serif) for headings, Inter for everything else,
+  pill buttons, `rounded-3xl` cards with `shadow-soft`. Mobile first: every
+  screen must work at 375px wide. Fonts are self-hosted via @fontsource.
 - **Every schema change gets a migration.** Edit `src/db/schema.ts`, run
   `npm run db:generate`, commit the new file in `migrations/`, then apply it
   locally and remotely. Never edit an applied migration; add a new one.
