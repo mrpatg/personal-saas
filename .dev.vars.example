@@ -1,0 +1,16 @@
+# Local secrets for `npm run dev` / `wrangler dev`.
+# Copy this file to .dev.vars (which git ignores) and fill in real values.
+# In production, set each one with: npx wrangler secret put <NAME>
+#
+# None are needed yet. They arrive with their features:
+
+# Better Auth (auth feature) — generate with: openssl rand -base64 32
+# BETTER_AUTH_SECRET=
+# BETTER_AUTH_URL=http://localhost:4321
+
+# Stripe (payments feature)
+# STRIPE_SECRET_KEY=
+# STRIPE_WEBHOOK_SECRET=
+
+# Resend (email feature)
+# RESEND_API_KEY=
