@@ -31,10 +31,12 @@ export interface SiteConfig {
   nav: NavLink[];
 }
 
+const contactEmail = 'hello@example.com';
+
 export const site: SiteConfig = {
   name: 'Client Portal',
   tagline: 'Projects, tasks and invoices in one place.',
-  contactEmail: 'hello@example.com',
+  contactEmail,
   colors: {
     brand: '#1e293b', // slate-800
     brandForeground: '#ffffff',
@@ -42,6 +44,6 @@ export const site: SiteConfig = {
   },
   nav: [
     { label: 'Home', href: '/' },
-    { label: 'Contact', href: 'mailto:hello@example.com' },
+    { label: 'Contact', href: `mailto:${contactEmail}` },
   ],
 };
