@@ -31,9 +31,14 @@ const year = new Date().getFullYear();
   <body class="flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased">
     <header class="bg-brand text-brand-foreground">
       <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
-        <a href="/" class="flex items-baseline gap-2">
-          <span class="text-lg font-semibold">{site.owner}</span>
-          <span class="text-sm opacity-75">{site.name}</span>
+        <a href="/" class="flex items-center gap-3" aria-label={`${site.owner} ${site.name} home`}>
+          <span
+            class="flex h-9 w-9 items-center justify-center rounded-md bg-accent text-sm font-bold tracking-tight text-white"
+            aria-hidden="true"
+          >
+            {site.monogram}
+          </span>
+          <span class="text-lg font-semibold">{site.name}</span>
         </a>
         <nav class="flex gap-6 text-sm">
           {site.nav.map((link) => (

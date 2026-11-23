@@ -14,6 +14,8 @@ export interface NavLink {
 export interface SiteConfig {
   /** The business behind the site. Shown in the header, footer and page titles. */
   owner: string;
+  /** Short monogram (1–3 letters) used as the header logo and favicon. */
+  monogram: string;
   /** What this app is called, e.g. "Client Portal". Shown next to the owner. */
   name: string;
   /** One line on what the business does, shown on the home page. */
@@ -39,6 +41,7 @@ const contactEmail = 'patrick@patrickgodbey.com';
 
 export const site: SiteConfig = {
   owner: 'Patrick Godbey',
+  monogram: 'PG',
   name: 'Client Portal',
   tagline: 'Project progress, conversations and invoices, all in one place.',
   description: 'Software development consulting for the people making technology decisions.',

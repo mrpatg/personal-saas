@@ -22,7 +22,7 @@ future SaaS sites, so **nothing business-specific is hardcoded** outside
 
 ```
 src/
-  config/site.ts      # ALL branding: owner, name, tagline, description, contact email, colors, nav
+  config/site.ts      # ALL branding: owner, monogram, name, tagline, description, contact email, colors, nav
   layouts/            # Page shells (BaseLayout reads site.ts)
   components/         # Reusable UI pieces
   pages/              # Routes. .astro = pages, .ts = API endpoints (e.g. health.ts)
