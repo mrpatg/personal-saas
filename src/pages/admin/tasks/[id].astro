@@ -26,6 +26,7 @@ import {
   totalsOf,
 } from '../../../lib/work';
 import { getDb, schema } from '../../../db';
+import { invoiceNumber, invoiceRefs } from '../../../lib/invoices';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
@@ -141,7 +142,7 @@ if (Astro.request.method === 'POST') {
   } else if (intent === 'delete-entry') {
     const entry = await db.select().from(schema.workEntry).where(eq(schema.workEntry.id, field(form, 'entryId'))).get();
     if (!entry || entry.taskId !== id) error = 'That entry no longer exists.';
-    else if (entry.invoiceId) error = 'That entry is on an invoice, so it can no longer be deleted.';
+    else if (entry.invoiceId) error = 'That entry is on an invoice. To change it, remove its line from the draft invoice (or void a sent one) first.';
     else {
       await db.delete(schema.workEntry).where(eq(schema.workEntry.id, entry.id)).run();
       anchor = 'work';
@@ -155,6 +156,7 @@ if (Astro.request.method === 'POST') {
 const current = (await db.select().from(schema.task).where(eq(schema.task.id, id)).get()) ?? task;
 const [comments, entries] = await Promise.all([taskComments(id), taskEntries(id)]);
 const totals = totalsOf(entries);
+const refs = await invoiceRefs([...new Set(entries.map((e) => e.invoiceId).filter((x): x is string => !!x))]);
 const checkbox = 'h-4 w-4 rounded accent-primary';
 ---
 
@@ -192,7 +194,7 @@ const checkbox = 'h-4 w-4 rounded accent-primary';
     <!-- Time and costs -->
     <section id="work" class="scroll-mt-24">
       <h2 class="font-display text-3xl">Time and costs</h2>
-      <p class="mt-1 text-sm text-muted">Only you can see these. They'll be picked up by the next invoice for this project.</p>
+      <p class="mt-1 text-sm text-muted">Only you can see these. Unbilled entries are picked up by the next invoice for this project.</p>
       <Card class="mt-5" padded={false}>
         {entries.length === 0 ? (
           <p class="px-5 py-5 text-sm text-muted sm:px-7">Nothing logged yet.</p>
@@ -208,7 +210,13 @@ const checkbox = 'h-4 w-4 rounded accent-primary';
                   {e.description && <p class="mt-0.5 text-sm break-words text-muted">{e.description}</p>}
                   <p class="mt-1 flex flex-wrap gap-1.5">
                     {!e.billable && <StatusBadge>Not billable</StatusBadge>}
-                    {e.invoiceId && <StatusBadge tone="success">Invoiced</StatusBadge>}
+                    {e.invoiceId && (
+                      <a href={`/admin/invoices/${e.invoiceId}`} class="hover:opacity-80">
+                        <StatusBadge tone={refs.get(e.invoiceId)?.status === 'draft' ? 'neutral' : 'success'}>
+                          {refs.get(e.invoiceId)?.status === 'draft' ? 'On draft invoice' : `Invoiced · ${invoiceNumber({ number: refs.get(e.invoiceId)?.number ?? null })}`}
+                        </StatusBadge>
+                      </a>
+                    )}
                   </p>
                 </div>
                 <div class="flex shrink-0 flex-col items-end gap-1">

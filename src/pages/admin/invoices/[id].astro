@@ -1,0 +1,386 @@
+---
+/**
+ * Admin: one invoice. Drafts can be edited (lines, dates, tax, notes), pull
+ * in newer unbilled work, be sent or deleted. Sent invoices can be marked
+ * paid or voided. The left column shows the invoice exactly as the client sees it.
+ */
+import { and, eq } from 'drizzle-orm';
+import AppLayout from '../../../layouts/AppLayout.astro';
+import Card from '../../../components/ui/Card.astro';
+import Button from '../../../components/ui/Button.astro';
+import InvoiceDocument from '../../../components/InvoiceDocument.astro';
+import { inputClass, textareaClass } from '../../../components/ui/forms';
+import { adminNav } from '../../../lib/nav';
+import { field } from '../../../lib/auth-helpers';
+import { formatDate, parseDate } from '../../../lib/projects';
+import { formatMoney, parseMoney, centsToInput } from '../../../lib/work';
+import {
+  addCustomLine,
+  deleteDraft,
+  formatQuantity,
+  invoiceLines,
+  invoiceName,
+  markPaid,
+  markUnpaid,
+  parseQuantity,
+  parseTaxRate,
+  pullUnbilledWork,
+  recalcTotals,
+  removeLine,
+  sendInvoice,
+  todayISO,
+  unbilledEntries,
+  updateLine,
+  voidInvoice,
+} from '../../../lib/invoices';
+import { getDb, schema } from '../../../db';
+
+const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
+const db = getDb();
+const id = Astro.params.id ?? '';
+const here = `/admin/invoices/${id}`;
+
+const load = () => db.select().from(schema.invoice).where(eq(schema.invoice.id, id)).get();
+const found = await load();
+if (!found) return new Response('Invoice not found', { status: 404 });
+const inv = found;
+
+let error = '';
+const today = todayISO();
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const intent = field(form, 'intent');
+  let notice = '';
+  let anchor = '';
+  const isDraft = inv.status === 'draft';
+
+  /** Reads description/details/quantity/rate fields shared by the line forms. */
+  const lineInput = () => {
+    const description = field(form, 'description');
+    const quantityHundredths = parseQuantity(field(form, 'quantity') || '1');
+    const unitCents = parseMoney(field(form, 'unit'));
+    if (!description) return 'Each line needs a description.';
+    if (!quantityHundredths) return 'Enter a quantity, e.g. 1 or 2.5.';
+    if (unitCents == null) return 'Enter the rate or price, e.g. 150.';
+    return { description, details: field(form, 'details') || null, quantityHundredths, unitCents };
+  };
+
+  if (['update-invoice', 'add-line', 'update-line', 'remove-line', 'pull-work', 'send', 'delete'].includes(intent) && !isDraft) {
+    error = 'This invoice has been sent, so it can no longer be changed.';
+  } else if (intent === 'update-invoice') {
+    const issueDate = parseDate(field(form, 'issueDate'));
+    const dueDate = parseDate(field(form, 'dueDate'));
+    const taxRateBps = parseTaxRate(field(form, 'taxRate'));
+    const billTo = field(form, 'billTo');
+    if (!issueDate || !dueDate) error = 'Choose an issue date and a due date.';
+    else if (dueDate < issueDate) error = 'The due date can’t be before the issue date.';
+    else if (taxRateBps == null) error = 'Enter the tax rate as a percentage, e.g. 8.25 (or 0).';
+    else if (!billTo) error = 'Fill in who the invoice is billed to.';
+    else {
+      await db
+        .update(schema.invoice)
+        .set({ title: field(form, 'title') || null, billTo, issueDate, dueDate, taxRateBps, notes: field(form, 'notes') || null })
+        .where(eq(schema.invoice.id, id))
+        .run();
+      await recalcTotals(id);
+      notice = 'saved';
+      anchor = 'edit';
+    }
+  } else if (intent === 'add-line') {
+    const input = lineInput();
+    if (typeof input === 'string') error = input;
+    else {
+      await addCustomLine(inv, input);
+      anchor = 'lines';
+    }
+  } else if (intent === 'update-line' || intent === 'remove-line') {
+    const line = await db
+      .select()
+      .from(schema.invoiceLine)
+      .where(and(eq(schema.invoiceLine.id, field(form, 'lineId')), eq(schema.invoiceLine.invoiceId, id)))
+      .get();
+    if (!line) error = 'That line no longer exists.';
+    else if (intent === 'remove-line') {
+      await removeLine(line);
+      anchor = 'lines';
+    } else {
+      const input = lineInput();
+      if (typeof input === 'string') error = input;
+      else {
+        await updateLine(line, input);
+        anchor = `line-${line.id}`;
+      }
+    }
+  } else if (intent === 'pull-work') {
+    const added = await pullUnbilledWork(inv, parseDate(field(form, 'workThrough')) ?? today);
+    notice = added ? `pulled-${added}` : 'pulled-0';
+    anchor = 'lines';
+  } else if (intent === 'send') {
+    const lines = await invoiceLines(id);
+    if (lines.length === 0) error = 'Add at least one line before sending.';
+    else {
+      await sendInvoice(inv);
+      notice = 'sent';
+    }
+  } else if (intent === 'delete') {
+    await deleteDraft(inv);
+    return Astro.redirect('/admin/invoices?status=draft', 303);
+  } else if (intent === 'mark-paid') {
+    const paidDate = parseDate(field(form, 'paidDate'));
+    if (inv.status !== 'sent') error = 'Only a sent invoice can be marked paid.';
+    else if (!paidDate) error = 'Choose the date the payment arrived.';
+    else {
+      await markPaid(inv, paidDate);
+      notice = 'paid';
+    }
+  } else if (intent === 'mark-unpaid') {
+    if (inv.status !== 'paid') error = 'This invoice isn’t marked paid.';
+    else await markUnpaid(inv);
+  } else if (intent === 'void') {
+    if (inv.status !== 'sent') error = 'Only an unpaid sent invoice can be voided.';
+    else if (field(form, 'confirm') !== 'void') error = 'Tick the box to confirm voiding this invoice.';
+    else {
+      await voidInvoice(inv);
+      notice = 'voided';
+    }
+  } else error = 'Unknown action.';
+
+  if (!error) return Astro.redirect(`${here}${notice ? `?notice=${notice}` : ''}${anchor ? `#${anchor}` : ''}`, 303);
+  Astro.response.status = 400;
+}
+
+const current = (await load()) ?? inv;
+const [lines, client, project] = await Promise.all([
+  invoiceLines(id),
+  db.select().from(schema.user).where(eq(schema.user.id, current.clientId)).get(),
+  current.projectId ? db.select().from(schema.project).where(eq(schema.project.id, current.projectId)).get() : undefined,
+]);
+const newerWork = current.status === 'draft' && current.projectId ? await unbilledEntries(current.projectId) : [];
+const newerCents = newerWork.reduce((s, r) => s + r.entry.amountCents, 0);
+
+const created = Astro.url.searchParams.get('created');
+const n = Astro.url.searchParams.get('notice') ?? '';
+const notice =
+  created != null
+    ? Number(created)
+      ? `Draft created with ${created} line${created === '1' ? '' : 's'} from unbilled work. Review it, then send it when it looks right.`
+      : current.projectId
+        ? 'Draft created. There was no unbilled work on this project, so add lines below.'
+        : 'Draft created. Add its lines below.'
+    : n.startsWith('pulled-')
+      ? n === 'pulled-0' ? 'No newer unbilled work to add.' : `Added ${n.slice(7)} line(s) of newer work.`
+      : ({
+          saved: 'Invoice details saved.',
+          sent: 'Invoice sent. Your client can now see it in their portal. (Email notices arrive with the email feature, so let them know it’s there.)',
+          paid: 'Marked as paid.',
+          voided: 'Invoice voided. Its work is unbilled again and can go on a new invoice.',
+        } as Record<string, string>)[n];
+
+const small = 'h-9 rounded-xl bg-canvas px-3 text-sm ring-1 ring-line outline-none focus:ring-2 focus:ring-primary w-full';
+---
+
+<AppLayout title={invoiceName(current)} nav={adminNav} active="/admin/invoices" user={{ name: admin.name, company: 'Admin' }} signOut>
+  <div class="print:hidden">
+    <a href="/admin/invoices" class="text-sm text-muted hover:text-ink">← All invoices</a>
+    {error && <p role="alert" class="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+    {notice && <p role="status" class="mt-4 rounded-2xl bg-primary-soft px-4 py-3 text-sm text-primary">{notice}</p>}
+  </div>
+
+  <div class="mt-4 grid gap-6 lg:grid-cols-[1fr_300px]">
+    <InvoiceDocument invoice={current} lines={lines} projectName={project?.name} />
+
+    <!-- Actions -->
+    <div class="space-y-4 print:hidden lg:sticky lg:top-24 lg:self-start">
+      <Card>
+        <p class="text-sm text-muted">{client?.name}{project ? ` · ${project.name}` : ''}</p>
+        <p class="mt-1 font-display text-4xl">{formatMoney(current.totalCents)}</p>
+
+        {current.status === 'draft' && (
+          <>
+            <p class="mt-2 text-sm text-muted">Draft. Only you can see it.</p>
+            <form method="post" class="mt-5">
+              <input type="hidden" name="intent" value="send" />
+              <Button type="submit" size="lg" class="w-full" disabled={lines.length === 0}>Send to client</Button>
+            </form>
+            <p class="mt-2 text-xs text-muted">Sending gives it the next invoice number, locks it and shows it in the client’s portal.</p>
+          </>
+        )}
+
+        {current.status === 'sent' && (
+          <>
+            <p class="mt-2 text-sm text-muted">Sent {current.sentAt ? formatDate(current.sentAt.toISOString().slice(0, 10)) : ''} · Due {formatDate(current.dueDate)}</p>
+            <form method="post" class="mt-5 space-y-3">
+              <input type="hidden" name="intent" value="mark-paid" />
+              <label class="block text-sm font-medium">
+                Payment received on
+                <input type="date" name="paidDate" value={today} required class={inputClass} />
+              </label>
+              <Button type="submit" class="w-full">Mark as paid</Button>
+            </form>
+          </>
+        )}
+
+        {current.status === 'paid' && (
+          <>
+            <p class="mt-2 text-sm text-muted">Paid {formatDate(current.paidDate)}</p>
+            <form method="post" class="mt-4">
+              <input type="hidden" name="intent" value="mark-unpaid" />
+              <button type="submit" class="text-sm text-muted hover:text-ink hover:underline">Undo: mark as unpaid</button>
+            </form>
+          </>
+        )}
+
+        {current.status === 'void' && <p class="mt-2 text-sm text-muted">Voided. The client still sees it, marked Void.</p>}
+
+        <div class="mt-5 border-t border-line pt-4">
+          <Button variant="ghost" size="sm" class="w-full" onclick="window.print()">Print or save as PDF</Button>
+        </div>
+      </Card>
+
+      {current.status === 'sent' && (
+        <details class="rounded-3xl p-5 ring-1 ring-rose-200">
+          <summary class="cursor-pointer list-none text-sm font-medium text-rose-700">Void this invoice…</summary>
+          <p class="mt-2 text-sm text-muted">Use this if it was sent by mistake or needs redoing. The number stays used, and its time and costs become unbilled again.</p>
+          <form method="post" class="mt-3 space-y-3">
+            <input type="hidden" name="intent" value="void" />
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="confirm" value="void" required class="h-4 w-4 accent-primary" /> Yes, void it</label>
+            <button type="submit" class="h-9 rounded-full bg-rose-700 px-4 text-sm font-medium text-white hover:brightness-110">Void invoice</button>
+          </form>
+        </details>
+      )}
+
+      {current.status === 'draft' && (
+        <form method="post" class="px-2">
+          <input type="hidden" name="intent" value="delete" />
+          <button type="submit" class="text-sm text-rose-700 hover:underline">Delete draft</button>
+          <p class="mt-1 text-xs text-muted">Its time and costs go back to unbilled.</p>
+        </form>
+      )}
+    </div>
+  </div>
+
+  {current.status === 'draft' && (
+    <div class="print:hidden">
+      <!-- Lines -->
+      <section id="lines" class="mt-12 scroll-mt-24">
+        <h2 class="font-display text-3xl">Line items</h2>
+        <p class="mt-1 text-sm text-muted">Time is grouped per task. Removing a line puts its time and costs back to unbilled.</p>
+
+        {current.projectId && (
+          <Card class="mt-5">
+            <form method="post" class="flex flex-wrap items-end gap-3">
+              <input type="hidden" name="intent" value="pull-work" />
+              <div class="min-w-0 flex-1 text-sm">
+                <p class="font-medium">Newer unbilled work on this project</p>
+                <p class="text-muted">{newerWork.length ? `${newerWork.length} entr${newerWork.length === 1 ? 'y' : 'ies'} · ${formatMoney(newerCents)}` : 'None right now.'}</p>
+              </div>
+              {newerWork.length > 0 && (
+                <>
+                  <label class="block text-sm">
+                    <span class="text-muted">Through</span>
+                    <input type="date" name="workThrough" value={today} class={`${small} mt-1`} />
+                  </label>
+                  <Button type="submit" size="sm" variant="secondary">Add to invoice</Button>
+                </>
+              )}
+            </form>
+          </Card>
+        )}
+
+        <div class="mt-5 space-y-3">
+          {lines.map((l) => (
+            <Card class="scroll-mt-24">
+              <form method="post" id={`line-${l.id}`} class="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_90px_120px]">
+                <input type="hidden" name="lineId" value={l.id} />
+                <label class="col-span-2 block text-xs font-medium text-muted sm:col-span-1">
+                  Description
+                  <input name="description" value={l.description} required maxlength="300" class={`${small} mt-1 text-ink`} />
+                </label>
+                <label class="block text-xs font-medium text-muted">
+                  {l.kind === 'time' ? 'Hours' : 'Qty'}
+                  <input name="quantity" value={formatQuantity(l.quantityHundredths)} required inputmode="decimal" class={`${small} mt-1 text-ink`} />
+                </label>
+                <label class="block text-xs font-medium text-muted">
+                  {l.kind === 'time' ? 'Rate' : 'Price'}
+                  <input name="unit" value={centsToInput(l.unitCents)} required inputmode="decimal" class={`${small} mt-1 text-ink`} />
+                </label>
+                <label class="col-span-2 block text-xs font-medium text-muted sm:col-span-3">
+                  Details <span class="font-normal">(optional)</span>
+                  <input name="details" value={l.details ?? ''} maxlength="1000" class={`${small} mt-1 text-ink`} />
+                </label>
+                <div class="col-span-2 flex flex-wrap items-center justify-between gap-2 sm:col-span-3">
+                  <span class="text-sm font-medium tabular-nums">{formatMoney(l.amountCents)}</span>
+                  <span class="flex gap-2">
+                    <Button type="submit" size="sm" variant="secondary" name="intent" value="update-line">Save line</Button>
+                    <button type="submit" name="intent" value="remove-line" formnovalidate class="rounded-full px-3 text-sm text-rose-700 hover:bg-rose-50">Remove</button>
+                  </span>
+                </div>
+              </form>
+            </Card>
+          ))}
+        </div>
+
+        <Card class="mt-5">
+          <h3 class="font-display text-2xl">Add a line</h3>
+          <p class="mt-1 text-sm text-muted">For fixed fees, hosting or any other one-off charge.</p>
+          <form method="post" class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-[1fr_90px_120px]">
+            <input type="hidden" name="intent" value="add-line" />
+            <label class="col-span-2 block text-xs font-medium text-muted sm:col-span-1">
+              Description
+              <input name="description" required maxlength="300" placeholder="e.g. Hosting (December)" class={`${small} mt-1 text-ink`} />
+            </label>
+            <label class="block text-xs font-medium text-muted">
+              Qty
+              <input name="quantity" value="1" required inputmode="decimal" class={`${small} mt-1 text-ink`} />
+            </label>
+            <label class="block text-xs font-medium text-muted">
+              Price
+              <input name="unit" required inputmode="decimal" placeholder="100.00" class={`${small} mt-1 text-ink`} />
+            </label>
+            <label class="col-span-2 block text-xs font-medium text-muted sm:col-span-3">
+              Details <span class="font-normal">(optional)</span>
+              <input name="details" maxlength="1000" class={`${small} mt-1 text-ink`} />
+            </label>
+            <div class="col-span-2 sm:col-span-3"><Button type="submit" size="sm">Add line</Button></div>
+          </form>
+        </Card>
+      </section>
+
+      <!-- Invoice details -->
+      <section id="edit" class="mt-12 scroll-mt-24">
+        <Card class="max-w-2xl">
+          <h2 class="font-display text-2xl">Invoice details</h2>
+          <form method="post" class="mt-5 grid gap-4 sm:grid-cols-2">
+            <input type="hidden" name="intent" value="update-invoice" />
+            <label class="block text-sm font-medium sm:col-span-2">
+              Title <span class="font-normal text-muted">(optional)</span>
+              <input name="title" value={current.title ?? ''} maxlength="200" placeholder="e.g. December development" autocomplete="off" class={inputClass} />
+            </label>
+            <label class="block text-sm font-medium sm:col-span-2">
+              Billed to <span class="font-normal text-muted">(one line per row; add their address if needed)</span>
+              <textarea name="billTo" rows="4" required maxlength="1000" class={textareaClass}>{current.billTo}</textarea>
+            </label>
+            <label class="block text-sm font-medium">
+              Issue date
+              <input type="date" name="issueDate" value={current.issueDate} required class={inputClass} />
+            </label>
+            <label class="block text-sm font-medium">
+              Due date
+              <input type="date" name="dueDate" value={current.dueDate} required class={inputClass} />
+            </label>
+            <label class="block text-sm font-medium">
+              Tax rate (%)
+              <input name="taxRate" value={String(current.taxRateBps / 100)} inputmode="decimal" class={inputClass} />
+            </label>
+            <label class="block text-sm font-medium sm:col-span-2">
+              Note to the client <span class="font-normal text-muted">(optional)</span>
+              <textarea name="notes" rows="3" maxlength="2000" class={textareaClass}>{current.notes ?? ''}</textarea>
+            </label>
+            <div class="sm:col-span-2"><Button type="submit">Save details</Button></div>
+          </form>
+        </Card>
+      </section>
+    </div>
+  )}
+</AppLayout>
