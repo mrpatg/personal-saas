@@ -86,7 +86,7 @@ export const site: SiteConfig = {
   locale: 'en-US',
   billing: {
     from: 'Patrick Godbey',
-    address: [],
+    address: ['218 Roop Drive', 'Mount Hope, WV 25880'],
     invoicePrefix: 'INV-',
     firstInvoiceNumber: 1001,
     paymentTermsDays: 14,
