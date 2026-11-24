@@ -1,0 +1,193 @@
+---
+/**
+ * Admin: client accounts. Add a client, reset a password, disable or
+ * re-enable an account. Forms post back here and call Better Auth's admin
+ * API with the admin's own session, so its permission checks apply too.
+ */
+import { asc, eq } from 'drizzle-orm';
+import AppLayout from '../../layouts/AppLayout.astro';
+import Card from '../../components/ui/Card.astro';
+import Button from '../../components/ui/Button.astro';
+import StatusBadge from '../../components/ui/StatusBadge.astro';
+import { adminNav } from '../../lib/nav';
+import { getAuth, ROLES } from '../../lib/auth';
+import { authErrorMessage, field, generatePassword } from '../../lib/auth-helpers';
+import { getDb, schema } from '../../db';
+
+const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
+const db = getDb();
+const headers = Astro.request.headers;
+
+const input =
+  'mt-1.5 block h-11 w-full rounded-2xl bg-canvas px-4 text-[15px] ring-1 ring-line transition outline-none placeholder:text-muted/70 focus:ring-2 focus:ring-primary';
+
+/** Shown once after creating a client or resetting a password. */
+let credentials: { title: string; email: string; password: string } | null = null;
+let notice = '';
+let error = '';
+let draft = { name: '', company: '', email: '' };
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const intent = field(form, 'intent');
+  try {
+    if (intent === 'create') {
+      draft = { name: field(form, 'name'), company: field(form, 'company'), email: field(form, 'email') };
+      const password = field(form, 'password') || generatePassword();
+      await getAuth().api.createUser({
+        headers,
+        body: {
+          name: draft.name,
+          email: draft.email,
+          password,
+          role: ROLES.client,
+          data: { company: draft.company || null },
+        },
+      });
+      credentials = { title: `${draft.name} can now sign in`, email: draft.email.toLowerCase(), password };
+      draft = { name: '', company: '', email: '' };
+    } else {
+      // Every other action targets an existing client (never an admin).
+      const target = await db.select().from(schema.user).where(eq(schema.user.id, field(form, 'userId'))).get();
+      if (!target || target.role !== ROLES.client) throw new Error('Client not found.');
+
+      if (intent === 'reset-password') {
+        const password = field(form, 'password') || generatePassword();
+        await getAuth().api.setUserPassword({ headers, body: { userId: target.id, newPassword: password } });
+        await getAuth().api.revokeUserSessions({ headers, body: { userId: target.id } });
+        credentials = { title: `New password for ${target.name}`, email: target.email, password };
+      } else if (intent === 'disable') {
+        await getAuth().api.banUser({ headers, body: { userId: target.id, banReason: 'Disabled by admin' } });
+        notice = `${target.name}'s account is disabled and they have been signed out.`;
+      } else if (intent === 'enable') {
+        await getAuth().api.unbanUser({ headers, body: { userId: target.id } });
+        notice = `${target.name}'s account is active again.`;
+      } else {
+        throw new Error('Unknown action.');
+      }
+    }
+  } catch (err) {
+    error = err instanceof Error && err.message === 'Client not found.' ? err.message : authErrorMessage(err);
+    Astro.response.status = 400;
+  }
+}
+
+const clients = await db
+  .select()
+  .from(schema.user)
+  .where(eq(schema.user.role, ROLES.client))
+  .orderBy(asc(schema.user.name))
+  .all();
+
+const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+---
+
+<AppLayout title="Clients" nav={adminNav} active="/admin/clients" user={{ name: admin.name, company: 'Admin' }} signOut>
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <p class="text-sm text-muted">Admin</p>
+      <h1 class="font-display text-4xl sm:text-5xl">Clients</h1>
+    </div>
+    <Button href="#add-client" variant="secondary">Add a client</Button>
+  </div>
+
+  {error && <p role="alert" class="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+  {notice && <p role="status" class="mt-6 rounded-2xl bg-primary-soft px-4 py-3 text-sm text-primary">{notice}</p>}
+
+  {credentials && (
+    <Card class="mt-6 ring-2! ring-primary!">
+      <h2 class="font-display text-2xl">{credentials.title}</h2>
+      <p class="mt-1 text-sm text-muted">Send these details to the client. The password is only shown once.</p>
+      <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-6">
+        <dt class="text-muted">Sign-in page</dt>
+        <dd class="font-medium break-all">{new URL('/login', Astro.url).href}</dd>
+        <dt class="text-muted">Email</dt>
+        <dd class="font-medium break-all">{credentials.email}</dd>
+        <dt class="text-muted">Temporary password</dt>
+        <dd class="font-mono text-base font-semibold tracking-wide">{credentials.password}</dd>
+      </dl>
+    </Card>
+  )}
+
+  <!-- Client list -->
+  <section class="mt-10">
+    {clients.length === 0 ? (
+      <Card>
+        <p class="text-muted">No clients yet. Add your first one below.</p>
+      </Card>
+    ) : (
+      <ul class="space-y-3">
+        {clients.map((c) => (
+          <li>
+            <Card>
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="font-semibold tracking-tight">{c.name}</p>
+                  <p class="text-sm text-muted">{c.company || 'No company'}</p>
+                  <p class="mt-1 text-sm break-all">{c.email}</p>
+                  <p class="mt-1 text-xs text-muted">Added {dateFmt.format(c.createdAt)}</p>
+                </div>
+                {c.banned ? <StatusBadge tone="danger">Disabled</StatusBadge> : <StatusBadge tone="success">Active</StatusBadge>}
+              </div>
+
+              <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-line/70 pt-4">
+                <details class="group">
+                  <summary class="inline-flex h-9 cursor-pointer list-none items-center rounded-full px-4 text-sm ring-1 ring-line transition hover:ring-primary/40">
+                    Reset password
+                  </summary>
+                  <form method="post" class="mt-3 flex flex-wrap items-end gap-2">
+                    <input type="hidden" name="intent" value="reset-password" />
+                    <input type="hidden" name="userId" value={c.id} />
+                    <label class="block text-sm">
+                      <span class="text-muted">New password (blank = generate one)</span>
+                      <input type="text" name="password" minlength="10" autocomplete="off" class={`${input} w-64`} />
+                    </label>
+                    <Button type="submit" size="sm">Set password</Button>
+                  </form>
+                </details>
+                <form method="post">
+                  <input type="hidden" name="userId" value={c.id} />
+                  {c.banned ? (
+                    <Button type="submit" size="sm" variant="ghost" name="intent" value="enable">Re-enable</Button>
+                  ) : (
+                    <Button type="submit" size="sm" variant="ghost" name="intent" value="disable" class="text-rose-700!">Disable</Button>
+                  )}
+                </form>
+              </div>
+            </Card>
+          </li>
+        ))}
+      </ul>
+    )}
+  </section>
+
+  <!-- Add client -->
+  <section id="add-client" class="mt-12 scroll-mt-24">
+    <Card class="max-w-2xl">
+      <h2 class="font-display text-3xl">Add a client</h2>
+      <p class="mt-1 text-sm text-muted">They can sign in right away with the email and password you give them.</p>
+      <form method="post" class="mt-6 grid gap-4 sm:grid-cols-2">
+        <input type="hidden" name="intent" value="create" />
+        <label class="block text-sm font-medium">
+          Name
+          <input name="name" value={draft.name} required autocomplete="off" class={input} />
+        </label>
+        <label class="block text-sm font-medium">
+          Company <span class="font-normal text-muted">(optional)</span>
+          <input name="company" value={draft.company} autocomplete="off" class={input} />
+        </label>
+        <label class="block text-sm font-medium sm:col-span-2">
+          Email
+          <input type="email" name="email" value={draft.email} required autocomplete="off" class={input} />
+        </label>
+        <label class="block text-sm font-medium sm:col-span-2">
+          Temporary password <span class="font-normal text-muted">(leave blank to generate one)</span>
+          <input type="text" name="password" minlength="10" autocomplete="off" class={input} />
+        </label>
+        <div class="sm:col-span-2">
+          <Button type="submit">Create client account</Button>
+        </div>
+      </form>
+    </Card>
+  </section>
+</AppLayout>

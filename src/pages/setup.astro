@@ -1,0 +1,102 @@
+---
+/**
+ * One-time setup: creates the first admin account. Only works while the
+ * database has no users; after that it redirects to /login.
+ */
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Logo from '../components/Logo.astro';
+import Button from '../components/ui/Button.astro';
+import { site } from '../config/site';
+import { getAuth, ROLES } from '../lib/auth';
+import { authErrorMessage, field, redirectWithCookies } from '../lib/auth-helpers';
+import { getDb, schema } from '../db';
+
+const hasUsers = async () =>
+  !!(await getDb().select({ id: schema.user.id }).from(schema.user).limit(1).get());
+
+if (await hasUsers()) return Astro.redirect('/login');
+
+const input =
+  'mt-1.5 block h-12 w-full rounded-2xl bg-canvas px-4 text-[15px] ring-1 ring-line transition outline-none placeholder:text-muted/70 focus:ring-2 focus:ring-primary';
+
+let error = '';
+let values = { name: '', email: '' };
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  values = { name: field(form, 'name'), email: field(form, 'email') };
+  const password = typeof form.get('password') === 'string' ? (form.get('password') as string) : '';
+  const confirm = form.get('confirm');
+
+  if (password !== confirm) {
+    error = 'The passwords do not match.';
+  } else if (password.length < 10 || password.length > 128) {
+    error = 'Use a password between 10 and 128 characters.';
+  } else if (!values.name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) {
+    error = 'Enter your name and a valid email address.';
+  } else if (await hasUsers()) {
+    // Someone finished setup in the meantime.
+    return Astro.redirect('/login');
+  } else {
+    try {
+      // Public sign-up is off and the admin API needs a signed-in admin, so the
+      // very first account is created through Better Auth's internal adapter.
+      const ctx = await getAuth().$context;
+      const admin = await ctx.internalAdapter.createUser({
+        name: values.name,
+        email: values.email.toLowerCase(),
+        emailVerified: false,
+        role: ROLES.admin,
+      }, { method: 'admin' });
+      await ctx.internalAdapter.linkAccount({
+        userId: admin.id,
+        providerId: 'credential',
+        accountId: admin.id,
+        password: await ctx.password.hash(password),
+      });
+      const { headers } = await getAuth().api.signInEmail({
+        body: { email: values.email, password, rememberMe: true },
+        headers: Astro.request.headers,
+        returnHeaders: true,
+      });
+      return redirectWithCookies('/admin', headers);
+    } catch (err) {
+      error = authErrorMessage(err);
+    }
+  }
+  Astro.response.status = 400;
+}
+---
+
+<BaseLayout title="Set up" noindex>
+  <main class="flex min-h-dvh flex-col px-5 py-8 sm:px-8">
+    <Logo />
+    <div class="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center py-12">
+      <p class="text-sm text-muted">{site.owner} · {site.name}</p>
+      <h1 class="mt-2 font-display text-4xl">Create the admin account</h1>
+      <p class="mt-2 text-muted">This is a one-time step. Once the admin exists, this page switches itself off.</p>
+
+      {error && <p role="alert" class="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+
+      <form method="post" class="mt-8 space-y-5">
+        <label class="block text-sm font-medium">
+          Your name
+          <input name="name" value={values.name} autocomplete="name" required class={input} />
+        </label>
+        <label class="block text-sm font-medium">
+          Email
+          <input type="email" name="email" value={values.email} autocomplete="email" required class={input} />
+        </label>
+        <label class="block text-sm font-medium">
+          Password
+          <input type="password" name="password" autocomplete="new-password" minlength="10" required class={input} />
+          <span class="mt-1.5 block text-xs font-normal text-muted">At least 10 characters.</span>
+        </label>
+        <label class="block text-sm font-medium">
+          Confirm password
+          <input type="password" name="confirm" autocomplete="new-password" minlength="10" required class={input} />
+        </label>
+        <Button type="submit" size="lg" class="w-full">Create admin account</Button>
+      </form>
+    </div>
+  </main>
+</BaseLayout>
