@@ -1,0 +1,39 @@
+---
+/** Admin home: a quick summary and shortcuts. */
+import { and, eq, sql, type SQL } from 'drizzle-orm';
+import AppLayout from '../../layouts/AppLayout.astro';
+import Card from '../../components/ui/Card.astro';
+import Button from '../../components/ui/Button.astro';
+import { adminNav } from '../../lib/nav';
+import { ROLES } from '../../lib/auth';
+import { getDb, schema } from '../../db';
+
+const user = Astro.locals.user!; // guaranteed by src/middleware.ts
+const db = getDb();
+const count = (where: SQL | undefined) =>
+  db.select({ n: sql<number>`count(*)` }).from(schema.user).where(where).get().then((r) => r?.n ?? 0);
+const [clients, disabled] = await Promise.all([
+  count(eq(schema.user.role, ROLES.client)),
+  count(and(eq(schema.user.role, ROLES.client), eq(schema.user.banned, true))),
+]);
+---
+
+<AppLayout title="Admin" nav={adminNav} active="/admin" user={{ name: user.name, company: 'Admin' }} signOut>
+  <p class="text-sm text-muted">Admin</p>
+  <h1 class="font-display text-4xl sm:text-5xl">Hello, {user.name.split(' ')[0]}</h1>
+
+  <div class="mt-8 grid grid-cols-2 gap-3 sm:max-w-xl sm:gap-4">
+    <Card>
+      <p class="text-sm text-muted">Active clients</p>
+      <p class="mt-2 font-display text-4xl">{clients - disabled}</p>
+    </Card>
+    <Card>
+      <p class="text-sm text-muted">Disabled</p>
+      <p class="mt-2 font-display text-4xl">{disabled}</p>
+    </Card>
+  </div>
+
+  <div class="mt-8">
+    <Button href="/admin/clients">Manage clients</Button>
+  </div>
+</AppLayout>

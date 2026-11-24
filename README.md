@@ -15,7 +15,7 @@ all branding lives in [`src/config/site.ts`](src/config/site.ts).
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars     # local secrets (none required yet)
+cp .dev.vars.example .dev.vars     # then set BETTER_AUTH_SECRET (openssl rand -base64 32)
 npm run db:migrate:local           # creates the local D1 database
 npm run dev                        # http://localhost:4321
 ```
@@ -25,6 +25,10 @@ Check http://localhost:4321/health. It should return
 
 Local development uses a simulated D1 database stored in `.wrangler/`, so no
 Cloudflare login is needed.
+
+Open http://localhost:4321/login. With no accounts yet it sends you to
+`/setup`, a one-time page that creates the admin account. After that, add
+clients from **Admin → Clients**.
 
 ## First deploy (one time)
 
@@ -37,8 +41,12 @@ Paste the printed `database_id` into `wrangler.jsonc` (replacing the zeros), the
 
 ```bash
 npm run db:migrate:remote                      # create tables in the real database
+npx wrangler secret put BETTER_AUTH_SECRET     # paste the output of: openssl rand -base64 32
 npm run deploy                                 # build and upload; prints your live URL
 ```
+
+Then open `/setup` on the live site to create the admin account. If the site
+uses a custom domain, add it to `AUTH_HOSTS` in `wrangler.jsonc`.
 
 Visit `https://<your-worker>.<your-subdomain>.workers.dev/health` to confirm.
 
@@ -56,6 +64,7 @@ Visit `https://<your-worker>.<your-subdomain>.workers.dev/health` to confirm.
 
 1. Edit `src/config/site.ts` (name, tagline, email, colors, nav).
 2. In `wrangler.jsonc`, change `name` and `database_name`, and create a new D1 database.
+   Set `BETTER_AUTH_SECRET` for the new Worker and visit `/setup` to create its admin.
 3. Update the `db:` scripts only if you rename the `DB` binding.
 
 See [CLAUDE.md](CLAUDE.md) for conventions and the planned feature list.

@@ -1,0 +1,23 @@
+---
+/** Client home. Projects, tasks and invoices arrive with those features. */
+import AppLayout from '../../layouts/AppLayout.astro';
+import Card from '../../components/ui/Card.astro';
+import { clientNav } from '../../lib/nav';
+import { site } from '../../config/site';
+
+const user = Astro.locals.user!; // guaranteed by src/middleware.ts
+const firstName = user.name.split(' ')[0];
+---
+
+<AppLayout title="Overview" nav={clientNav} active="/app" user={{ name: user.name, company: user.company ?? undefined }} signOut>
+  <p class="text-sm text-muted">Welcome,</p>
+  <h1 class="font-display text-4xl sm:text-5xl">{firstName}</h1>
+
+  <Card class="mt-8 max-w-2xl">
+    <h2 class="font-display text-2xl">Your projects will appear here</h2>
+    <p class="mt-2 leading-relaxed text-muted">
+      Project progress, tasks and invoices are on their way. In the meantime, reach out any time at
+      <a href={`mailto:${site.contactEmail}`} class="text-primary hover:underline">{site.contactEmail}</a>.
+    </p>
+  </Card>
+</AppLayout>
