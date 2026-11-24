@@ -125,6 +125,8 @@ export const project = sqliteTable(
     /** Calendar dates as YYYY-MM-DD (no time zone). */
     startDate: text('start_date'),
     dueDate: text('due_date'),
+    /** Default hourly rate in cents for new time entries (optional). */
+    hourlyRateCents: integer('hourly_rate_cents'),
     ...timestamps,
   },
   (t) => [index('project_client_id_idx').on(t.clientId)],
@@ -147,4 +149,64 @@ export const task = sqliteTable(
     ...timestamps,
   },
   (t) => [index('task_project_id_idx').on(t.projectId, t.position)],
+);
+
+/** A comment on a task, by the admin or the project's client. */
+export const taskComment = sqliteTable(
+  'task_comment',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => task.id, { onDelete: 'cascade' }),
+    authorId: text('author_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    ...timestamps,
+  },
+  (t) => [index('task_comment_task_id_idx').on(t.taskId, t.createdAt)],
+);
+
+export const WORK_ENTRY_KINDS = ['time', 'expense'] as const;
+export type WorkEntryKind = (typeof WORK_ENTRY_KINDS)[number];
+
+/**
+ * Billable work on a task: either time (minutes x hourly rate) or a flat
+ * expense. Amounts are integer cents, fixed when the entry is saved so later
+ * rate changes don't alter past work.
+ *
+ * `invoiceId` is empty until an invoice claims the entry. An invoice for a
+ * project picks up every billable entry with an empty invoiceId, so each piece
+ * of work is billed exactly once. (The invoice table and its foreign key
+ * arrive with the invoicing feature.)
+ */
+export const workEntry = sqliteTable(
+  'work_entry',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => task.id, { onDelete: 'restrict' }),
+    kind: text('kind', { enum: WORK_ENTRY_KINDS }).notNull().default('time'),
+    /** Calendar date the work was done, YYYY-MM-DD. */
+    workDate: text('work_date').notNull(),
+    description: text('description'),
+    /** Time entries only. */
+    minutes: integer('minutes'),
+    /** Time entries only: hourly rate in cents at the time of entry. */
+    rateCents: integer('rate_cents'),
+    /** What this entry bills: round(minutes / 60 * rate) for time, the cost for expenses. */
+    amountCents: integer('amount_cents').notNull(),
+    /** Non-billable entries are tracked but never invoiced. */
+    billable: integer('billable', { mode: 'boolean' }).notNull().default(true),
+    /** Set when an invoice includes this entry; empty means unbilled. */
+    invoiceId: text('invoice_id'),
+    createdById: text('created_by_id').references(() => user.id, { onDelete: 'set null' }),
+    ...timestamps,
+  },
+  (t) => [
+    index('work_entry_task_id_idx').on(t.taskId, t.workDate),
+    index('work_entry_invoice_id_idx').on(t.invoiceId),
+  ],
 );

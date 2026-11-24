@@ -1,0 +1,14 @@
+---
+/** Small speech-bubble count shown on task rows. Renders nothing for zero. */
+interface Props {
+  count: number;
+}
+const { count } = Astro.props;
+---
+
+{count > 0 && (
+  <span class="inline-flex items-center gap-1 text-xs text-muted" title={`${count} comment${count === 1 ? '' : 's'}`}>
+    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V6a1 1 0 0 1 1-1z" /></svg>
+    {count}<span class="sr-only"> comment{count === 1 ? '' : 's'}</span>
+  </span>
+)}
