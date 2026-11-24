@@ -27,6 +27,24 @@ export interface SiteConfig {
   /** Billing currency (ISO 4217 code, e.g. "USD") and the locale money is formatted in. */
   currency: string;
   locale: string;
+  /** Invoice details. */
+  billing: {
+    /** Name shown in the invoice's "From" block (usually the business name). */
+    from: string;
+    /** Your address lines under "From". Empty array to leave out. */
+    address: string[];
+    /** Invoice numbers are prefix + a running number, e.g. "INV-1001". */
+    invoicePrefix: string;
+    firstInvoiceNumber: number;
+    /** Days from the issue date to the due date on new invoices. */
+    paymentTermsDays: number;
+    /** Default tax rate in percent for new invoices (0 for none). */
+    defaultTaxRate: number;
+    /** How to pay, shown on every invoice (until online payment is set up). */
+    paymentInstructions: string;
+    /** Small print at the bottom of every invoice. */
+    footer: string;
+  };
   /**
    * Theme colors (any CSS color). They become CSS variables and Tailwind
    * colors: `bg-primary`, `text-primary-foreground`, `bg-canvas`, `text-ink`.
@@ -66,6 +84,16 @@ export const site: SiteConfig = {
   contactEmail,
   currency: 'USD',
   locale: 'en-US',
+  billing: {
+    from: 'Patrick Godbey',
+    address: [],
+    invoicePrefix: 'INV-',
+    firstInvoiceNumber: 1001,
+    paymentTermsDays: 14,
+    defaultTaxRate: 0,
+    paymentInstructions: `Questions about this invoice? Email ${contactEmail}.`,
+    footer: 'Thank you for your business.',
+  },
   colors: {
     primary: '#1f4d3a', // forest green
     primaryForeground: '#f7f5ef',
