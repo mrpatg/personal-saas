@@ -1,12 +1,44 @@
 ---
 /**
- * Sign-in screen. The form is visual only for now: Better Auth wires it up
- * in the auth task.
+ * Sign-in screen. The form posts back to this page, which signs in with
+ * Better Auth on the server (works without JavaScript) and redirects each
+ * role to its own area.
  */
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Logo from '../components/Logo.astro';
 import Button from '../components/ui/Button.astro';
 import { site } from '../config/site';
+import { auth, homeFor } from '../lib/auth';
+import { authErrorMessage, field, redirectWithCookies, safeRedirect } from '../lib/auth-helpers';
+import { getDb, schema } from '../db';
+
+const nextParam = Astro.url.searchParams.get('next');
+
+// Already signed in: go straight to the right area.
+if (Astro.locals.user) return Astro.redirect(safeRedirect(nextParam, homeFor(Astro.locals.user)));
+
+// Fresh install with no accounts yet: create the first admin instead.
+const anyUser = await getDb().select({ id: schema.user.id }).from(schema.user).limit(1).get();
+if (!anyUser) return Astro.redirect('/setup');
+
+let error = '';
+let email = '';
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  email = field(form, 'email');
+  const password = form.get('password');
+  try {
+    const { headers, response } = await auth.api.signInEmail({
+      body: { email, password: typeof password === 'string' ? password : '', rememberMe: true },
+      headers: Astro.request.headers,
+      returnHeaders: true,
+    });
+    return redirectWithCookies(safeRedirect(nextParam, homeFor(response.user)), headers);
+  } catch (err) {
+    error = authErrorMessage(err, 'Sign-in failed. Please try again.');
+    Astro.response.status = 401;
+  }
+}
 
 const input =
   'mt-1.5 block h-12 w-full rounded-2xl bg-canvas px-4 text-[15px] ring-1 ring-line transition outline-none placeholder:text-muted/70 focus:ring-2 focus:ring-primary';
@@ -33,10 +65,14 @@ const input =
         <h1 class="font-display text-4xl">Welcome back</h1>
         <p class="mt-2 text-muted">Sign in to see your projects and invoices.</p>
 
-        <form class="mt-8 space-y-5" onsubmit="return false">
+        {error && (
+          <p role="alert" class="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>
+        )}
+
+        <form method="post" class="mt-8 space-y-5">
           <label class="block text-sm font-medium">
             Email
-            <input type="email" name="email" autocomplete="email" required placeholder="you@company.com" class={input} />
+            <input type="email" name="email" value={email} autocomplete="email" required placeholder="you@company.com" class={input} />
           </label>
           <label class="block text-sm font-medium">
             <span class="flex justify-between">
