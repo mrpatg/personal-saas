@@ -1,0 +1,71 @@
+---
+/** Client: one of their invoices, ready to read, print or save as PDF. */
+import { and, eq, inArray } from 'drizzle-orm';
+import AppLayout from '../../../layouts/AppLayout.astro';
+import Card from '../../../components/ui/Card.astro';
+import Button from '../../../components/ui/Button.astro';
+import InvoiceDocument from '../../../components/InvoiceDocument.astro';
+import { clientNav } from '../../../lib/nav';
+import { formatDate } from '../../../lib/projects';
+import { formatMoney } from '../../../lib/work';
+import { CLIENT_INVOICE_STATUSES, displayStatus, invoiceLines, invoiceName } from '../../../lib/invoices';
+import { getDb, schema } from '../../../db';
+import { site } from '../../../config/site';
+
+const user = Astro.locals.user!; // guaranteed by src/middleware.ts
+
+// Only the signed-in client's own non-draft invoices; anything else is a 404.
+const row = await getDb()
+  .select({ invoice: schema.invoice, projectName: schema.project.name })
+  .from(schema.invoice)
+  .leftJoin(schema.project, eq(schema.invoice.projectId, schema.project.id))
+  .where(
+    and(
+      eq(schema.invoice.id, Astro.params.id ?? ''),
+      eq(schema.invoice.clientId, user.id),
+      inArray(schema.invoice.status, CLIENT_INVOICE_STATUSES),
+    ),
+  )
+  .get();
+if (!row) return new Response('Invoice not found', { status: 404 });
+const inv = row.invoice;
+const lines = await invoiceLines(inv.id);
+const status = displayStatus(inv);
+---
+
+<AppLayout title={invoiceName(inv)} nav={clientNav} active="/app/invoices" user={{ name: user.name, company: user.company ?? undefined }} signOut>
+  <a href="/app/invoices" class="text-sm text-muted hover:text-ink print:hidden">← All invoices</a>
+
+  <div class="mt-4 grid gap-6 lg:grid-cols-[1fr_300px]">
+    <InvoiceDocument invoice={inv} lines={lines} projectName={row.projectName} />
+
+    <div class="print:hidden lg:sticky lg:top-24 lg:self-start">
+      <Card>
+        {status === 'paid' ? (
+          <>
+            <p class="text-sm text-muted">Paid</p>
+            <p class="mt-1 font-display text-5xl">{formatMoney(inv.totalCents)}</p>
+            <p class="mt-1 text-sm text-muted">Received {formatDate(inv.paidDate)}. Thank you!</p>
+          </>
+        ) : status === 'void' ? (
+          <>
+            <p class="text-sm text-muted">Void</p>
+            <p class="mt-1 text-sm">This invoice was cancelled and nothing is owed on it.</p>
+          </>
+        ) : (
+          <>
+            <p class="text-sm text-muted">Amount due</p>
+            <p class="mt-1 font-display text-5xl">{formatMoney(inv.totalCents)}</p>
+            <p class={`mt-1 text-sm ${status === 'overdue' ? 'font-medium text-rose-700' : 'text-muted'}`}>
+              {status === 'overdue' ? 'Overdue since' : 'Due'} {formatDate(inv.dueDate)}
+            </p>
+            {site.billing.paymentInstructions && <p class="mt-4 text-sm leading-relaxed whitespace-pre-line text-muted">{site.billing.paymentInstructions}</p>}
+          </>
+        )}
+        <div class="mt-6 border-t border-line pt-5">
+          <Button variant="secondary" size="sm" class="w-full" onclick="window.print()">Print or save as PDF</Button>
+        </div>
+      </Card>
+    </div>
+  </div>
+</AppLayout>

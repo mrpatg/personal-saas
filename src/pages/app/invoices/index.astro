@@ -1,0 +1,44 @@
+---
+/** Client: their invoices (never drafts) and what they owe. */
+import AppLayout from '../../../layouts/AppLayout.astro';
+import Card from '../../../components/ui/Card.astro';
+import InvoiceList from '../../../components/InvoiceList.astro';
+import { clientNav } from '../../../lib/nav';
+import { formatMoney } from '../../../lib/work';
+import { CLIENT_INVOICE_STATUSES, listInvoices, outstanding } from '../../../lib/invoices';
+import { site } from '../../../config/site';
+
+const user = Astro.locals.user!; // guaranteed by src/middleware.ts
+const [invoices, owed] = await Promise.all([
+  listInvoices({ clientId: user.id, statuses: CLIENT_INVOICE_STATUSES }),
+  outstanding(user.id),
+]);
+---
+
+<AppLayout title="Invoices" nav={clientNav} active="/app/invoices" user={{ name: user.name, company: user.company ?? undefined }} signOut>
+  <h1 class="font-display text-4xl sm:text-5xl">Invoices</h1>
+
+  {invoices.length === 0 ? (
+    <Card class="mt-8 max-w-2xl">
+      <h2 class="font-display text-2xl">No invoices yet</h2>
+      <p class="mt-2 leading-relaxed text-muted">
+        Invoices will appear here when they're issued. Questions about billing? Write to{' '}
+        <a href={`mailto:${site.contactEmail}`} class="text-primary hover:underline">{site.contactEmail}</a>.
+      </p>
+    </Card>
+  ) : (
+    <>
+      <div class="mt-8 grid grid-cols-2 gap-3 sm:max-w-xl sm:gap-4">
+        <Card class={owed.dueCents ? 'bg-primary! text-primary-foreground ring-0!' : ''}>
+          <p class="text-sm opacity-80">Balance due</p>
+          <p class="mt-2 font-display text-4xl">{formatMoney(owed.dueCents)}</p>
+        </Card>
+        <Card>
+          <p class="text-sm text-muted">Overdue</p>
+          <p class={`mt-2 font-display text-4xl ${owed.overdueCents ? 'text-rose-700' : ''}`}>{formatMoney(owed.overdueCents)}</p>
+        </Card>
+      </div>
+      <InvoiceList class="mt-8" invoices={invoices} hrefFor={(id) => `/app/invoices/${id}`} />
+    </>
+  )}
+</AppLayout>

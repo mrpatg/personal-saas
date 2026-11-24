@@ -1,0 +1,39 @@
+---
+/** A list of invoices linking to their pages, for client screens. */
+import Card from './ui/Card.astro';
+import StatusBadge from './ui/StatusBadge.astro';
+import { formatDate } from '../lib/projects';
+import { formatMoney } from '../lib/work';
+import { displayStatus, invoiceName, invoiceNumber, invoiceStatus, type Invoice } from '../lib/invoices';
+
+interface Props {
+  invoices: { invoice: Invoice; projectName: string | null }[];
+  hrefFor: (id: string) => string;
+  class?: string;
+}
+const { invoices, hrefFor, class: extra = '' } = Astro.props;
+---
+
+<Card padded={false} class={`overflow-hidden ${extra}`}>
+  <ul class="divide-y divide-line">
+    {invoices.map(({ invoice: inv, projectName }) => {
+      const s = invoiceStatus[displayStatus(inv)];
+      return (
+        <li>
+          <a href={hrefFor(inv.id)} class="flex items-center justify-between gap-4 px-5 py-4 transition hover:bg-primary-soft/50 sm:px-7">
+            <div class="min-w-0">
+              <p class="truncate font-medium">{invoiceName(inv)}</p>
+              <p class="truncate text-xs text-muted">
+                {invoiceNumber(inv)}{projectName ? ` · ${projectName}` : ''} · {inv.status === 'paid' ? `Paid ${formatDate(inv.paidDate)}` : `Due ${formatDate(inv.dueDate)}`}
+              </p>
+            </div>
+            <div class="flex shrink-0 items-center gap-3">
+              <span class="hidden sm:inline"><StatusBadge tone={s.tone}>{s.label}</StatusBadge></span>
+              <span class={`font-medium tabular-nums ${inv.status === 'void' ? 'text-muted line-through' : ''}`}>{formatMoney(inv.totalCents)}</span>
+            </div>
+          </a>
+        </li>
+      );
+    })}
+  </ul>
+</Card>
