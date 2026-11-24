@@ -5,6 +5,9 @@ import Card from '../../components/ui/Card.astro';
 import ProjectSummaryCard from '../../components/ProjectSummaryCard.astro';
 import { clientNav } from '../../lib/nav';
 import { clientProjects, openTaskCount } from '../../lib/projects';
+import InvoiceList from '../../components/InvoiceList.astro';
+import { formatMoney } from '../../lib/work';
+import { CLIENT_INVOICE_STATUSES, listInvoices, outstanding } from '../../lib/invoices';
 import { site } from '../../config/site';
 
 const user = Astro.locals.user!; // guaranteed by src/middleware.ts
@@ -12,13 +15,18 @@ const firstName = user.name.split(' ')[0];
 const projects = await clientProjects(user.id);
 const active = projects.filter((p) => p.status === 'active');
 const openTasks = openTaskCount(active);
+const [invoices, owed] = await Promise.all([
+  listInvoices({ clientId: user.id, statuses: CLIENT_INVOICE_STATUSES }),
+  outstanding(user.id),
+]);
+const recentInvoices = invoices.slice(0, 3);
 ---
 
 <AppLayout title="Overview" nav={clientNav} active="/app" user={{ name: user.name, company: user.company ?? undefined }} signOut>
   <p class="text-sm text-muted">Welcome,</p>
   <h1 class="font-display text-4xl sm:text-5xl">{firstName}</h1>
 
-  {projects.length === 0 ? (
+  {projects.length === 0 && invoices.length === 0 ? (
     <Card class="mt-8 max-w-2xl">
       <h2 class="font-display text-2xl">Your projects will appear here</h2>
       <p class="mt-2 leading-relaxed text-muted">
@@ -28,7 +36,7 @@ const openTasks = openTaskCount(active);
     </Card>
   ) : (
     <>
-      <div class="mt-8 grid grid-cols-2 gap-3 sm:max-w-xl sm:gap-4">
+      <div class="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
         <Card>
           <p class="text-sm text-muted">Active projects</p>
           <p class="mt-2 font-display text-4xl">{active.length}</p>
@@ -37,6 +45,13 @@ const openTasks = openTaskCount(active);
           <p class="text-sm text-muted">Open tasks</p>
           <p class="mt-2 font-display text-4xl">{openTasks}</p>
         </Card>
+        <a href="/app/invoices" class="col-span-2 block rounded-3xl transition hover:-translate-y-0.5 sm:col-span-1">
+          <Card class={`h-full ${owed.dueCents ? 'bg-primary! text-primary-foreground ring-0!' : ''}`}>
+            <p class="text-sm opacity-80">Balance due</p>
+            <p class="mt-2 font-display text-4xl">{formatMoney(owed.dueCents)}</p>
+            {owed.overdueCents > 0 && <p class="mt-1 text-xs">{formatMoney(owed.overdueCents)} overdue</p>}
+          </Card>
+        </a>
       </div>
 
       <section class="mt-12">
@@ -54,6 +69,16 @@ const openTasks = openTaskCount(active);
           </ul>
         )}
       </section>
+
+      {recentInvoices.length > 0 && (
+        <section class="mt-12">
+          <div class="flex items-center justify-between gap-4">
+            <h2 class="font-display text-3xl">Invoices</h2>
+            <a href="/app/invoices" class="text-sm text-primary hover:underline">View all</a>
+          </div>
+          <InvoiceList class="mt-5" invoices={recentInvoices} hrefFor={(id) => `/app/invoices/${id}`} />
+        </section>
+      )}
     </>
   )}
 </AppLayout>

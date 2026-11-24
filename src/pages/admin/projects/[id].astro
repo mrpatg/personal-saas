@@ -41,6 +41,7 @@ import {
   totalsByTask,
 } from '../../../lib/work';
 import { getDb, schema } from '../../../db';
+import { displayStatus, invoiceName, invoiceNumber, invoiceStatus, listInvoices } from '../../../lib/invoices';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
@@ -89,6 +90,7 @@ if (Astro.request.method === 'POST') {
     }
   } else if (intent === 'delete-project') {
     if (field(form, 'confirm') !== project.name) error = 'Type the project name exactly to delete it.';
+    else if ((await listInvoices({ projectId: id })).length) error = 'This project has invoices, so it can’t be deleted. Set its status to Archived instead.';
     else if (await projectEntryCount(id)) error = 'This project has time or costs logged, so it can’t be deleted. Set its status to Archived instead.';
     else {
       // Tasks are removed with it (ON DELETE CASCADE).
@@ -147,6 +149,7 @@ const counts = countsFrom(tasks.length, tasks.filter((t) => t.status === 'done')
 const taskIds = tasks.map((t) => t.id);
 const [work, comments] = await Promise.all([totalsByTask(taskIds), commentCounts(taskIds)]);
 const totals = sumTotals(work.values());
+const projectInvoices = await listInvoices({ projectId: id });
 const notice = {
   'project-saved': 'Project details saved.',
   created: 'Project created. Add its first tasks below.',
@@ -188,6 +191,38 @@ const iconButton =
       <p class="mt-2 font-display text-3xl">{formatMoney(totals.unbilledCents)}</p>
     </Card>
   </div>
+
+  <!-- Invoices -->
+  <section id="invoices" class="mt-10 scroll-mt-24">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h2 class="font-display text-3xl">Invoices</h2>
+      <Button href={`/admin/invoices?project=${id}#new-invoice`} size="sm" variant={totals.unbilledCents ? 'primary' : 'secondary'}>
+        Invoice {totals.unbilledCents ? `${formatMoney(totals.unbilledCents)} unbilled` : 'this project'}
+      </Button>
+    </div>
+    {projectInvoices.length === 0 ? (
+      <Card class="mt-5"><p class="text-sm text-muted">No invoices for this project yet.</p></Card>
+    ) : (
+      <Card class="mt-5 overflow-hidden" padded={false}>
+        <ul class="divide-y divide-line">
+          {projectInvoices.map(({ invoice: inv }) => {
+            const s = invoiceStatus[displayStatus(inv)];
+            return (
+              <li>
+                <a href={`/admin/invoices/${inv.id}`} class="flex items-center justify-between gap-4 px-5 py-3 text-sm transition hover:bg-primary-soft/50 sm:px-7">
+                  <span class="min-w-0 truncate"><span class="font-medium">{invoiceName(inv)}</span> <span class="text-muted">· {invoiceNumber(inv)} · {formatDate(inv.issueDate)}</span></span>
+                  <span class="flex shrink-0 items-center gap-3">
+                    <StatusBadge tone={s.tone}>{s.label}</StatusBadge>
+                    <span class={`font-medium tabular-nums ${inv.status === 'void' ? 'text-muted line-through' : ''}`}>{formatMoney(inv.totalCents)}</span>
+                  </span>
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+    )}
+  </section>
 
   <!-- Tasks -->
   <section id="tasks" class="mt-10 scroll-mt-24">

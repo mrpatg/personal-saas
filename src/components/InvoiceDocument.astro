@@ -1,0 +1,94 @@
+---
+/**
+ * The invoice itself, as the client sees and prints it. Used on the client
+ * invoice page and as the admin preview. Prints cleanly (AppLayout hides its
+ * chrome when printing).
+ */
+import Card from './ui/Card.astro';
+import StatusBadge from './ui/StatusBadge.astro';
+import { site } from '../config/site';
+import { formatDate } from '../lib/projects';
+import { formatMoney } from '../lib/work';
+import { displayStatus, formatQuantity, invoiceName, invoiceNumber, invoiceStatus, type Invoice, type InvoiceLine } from '../lib/invoices';
+
+interface Props {
+  invoice: Invoice;
+  lines: InvoiceLine[];
+  projectName?: string | null;
+  class?: string;
+}
+const { invoice: inv, lines, projectName, class: extra = '' } = Astro.props;
+const status = invoiceStatus[displayStatus(inv)];
+const taxPercent = Number((inv.taxRateBps / 100).toFixed(2));
+---
+
+<Card class={`print:bg-white! print:p-0! print:shadow-none! print:ring-0! sm:p-10! ${extra}`}>
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div class="min-w-0">
+      <p class="text-sm text-muted">{invoiceNumber(inv)}{projectName ? ` · ${projectName}` : ''}</p>
+      <h1 class="mt-1 font-display text-4xl break-words">{invoiceName(inv)}</h1>
+    </div>
+    <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+  </div>
+
+  <dl class="mt-8 grid grid-cols-2 gap-6 text-sm sm:grid-cols-[1.3fr_1fr_auto] sm:gap-8">
+    <div class="col-span-2 sm:col-span-1">
+      <dt class="text-muted">From</dt>
+      <dd class="mt-1 font-medium">{site.billing.from}</dd>
+      {site.billing.address.map((l) => <dd class="text-muted">{l}</dd>)}
+      <dd class="break-all text-muted">{site.contactEmail}</dd>
+    </div>
+    <div class="min-w-0">
+      <dt class="text-muted">Billed to</dt>
+      {inv.billTo.split('\n').map((l, i) => <dd class={`break-words ${i === 0 ? 'mt-1 font-medium' : 'text-muted'}`}>{l}</dd>)}
+    </div>
+    <div>
+      <dt class="text-muted">Issued</dt>
+      <dd class="mt-1">{formatDate(inv.issueDate)}</dd>
+      <dt class="mt-3 text-muted">{inv.status === 'paid' ? 'Paid' : 'Due'}</dt>
+      <dd class="mt-1">{formatDate(inv.status === 'paid' && inv.paidDate ? inv.paidDate : inv.dueDate)}</dd>
+    </div>
+  </dl>
+
+  <div class="mt-10">
+    <div class="hidden grid-cols-[1fr_60px_100px_110px] gap-4 border-b border-line pb-3 text-xs font-medium tracking-wide text-muted uppercase sm:grid print:grid">
+      <span>Description</span><span class="text-right">Qty</span><span class="text-right">Rate</span><span class="text-right">Amount</span>
+    </div>
+    {lines.length === 0 ? (
+      <p class="py-6 text-sm text-muted">No line items yet.</p>
+    ) : (
+      <ul class="divide-y divide-line">
+        {lines.map((l) => (
+          <li class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 py-4 text-sm break-inside-avoid sm:grid-cols-[1fr_60px_100px_110px] print:grid-cols-[1fr_60px_100px_110px]">
+            <div class="min-w-0">
+              <p class="break-words">{l.description}</p>
+              {l.details && <p class="mt-0.5 text-xs break-words text-muted">{l.details}</p>}
+            </div>
+            <span class="hidden text-right tabular-nums text-muted sm:block print:block">{formatQuantity(l.quantityHundredths)}</span>
+            <span class="hidden text-right tabular-nums text-muted sm:block print:block">{formatMoney(l.unitCents)}</span>
+            <span class="text-right font-medium tabular-nums">{formatMoney(l.amountCents)}</span>
+            <span class="text-xs text-muted sm:hidden print:hidden">{formatQuantity(l.quantityHundredths)} × {formatMoney(l.unitCents)}</span>
+          </li>
+        ))}
+      </ul>
+    )}
+    <div class="flex justify-end border-t border-line pt-5">
+      <dl class="w-full max-w-xs space-y-2 text-sm">
+        <div class="flex justify-between"><dt class="text-muted">Subtotal</dt><dd class="tabular-nums">{formatMoney(inv.subtotalCents)}</dd></div>
+        {inv.taxRateBps > 0 && (
+          <div class="flex justify-between"><dt class="text-muted">Tax ({taxPercent}%)</dt><dd class="tabular-nums">{formatMoney(inv.taxCents)}</dd></div>
+        )}
+        <div class="flex justify-between border-t border-line pt-3 text-base font-semibold">
+          <dt>{inv.status === 'paid' ? 'Total paid' : 'Total due'}</dt>
+          <dd class="tabular-nums">{formatMoney(inv.totalCents)}</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+
+  {inv.notes && <p class="mt-10 text-sm leading-relaxed whitespace-pre-line">{inv.notes}</p>}
+  {inv.status !== 'paid' && inv.status !== 'void' && site.billing.paymentInstructions && (
+    <p class="mt-6 text-sm leading-relaxed whitespace-pre-line text-muted">{site.billing.paymentInstructions}</p>
+  )}
+  {site.billing.footer && <p class="mt-6 text-sm text-muted">{site.billing.footer}</p>}
+</Card>

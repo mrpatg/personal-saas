@@ -178,8 +178,10 @@ export type WorkEntryKind = (typeof WORK_ENTRY_KINDS)[number];
  *
  * `invoiceId` is empty until an invoice claims the entry. An invoice for a
  * project picks up every billable entry with an empty invoiceId, so each piece
- * of work is billed exactly once. (The invoice table and its foreign key
- * arrive with the invoicing feature.)
+ * of work is billed exactly once. Deleting a draft or voiding an invoice
+ * clears invoiceId/invoiceLineId so the work can be billed again. (These are
+ * plain columns rather than foreign keys: SQLite can't add a foreign key to an
+ * existing table without rebuilding it. src/lib/invoices.ts keeps them in step.)
  */
 export const workEntry = sqliteTable(
   'work_entry',
@@ -202,6 +204,8 @@ export const workEntry = sqliteTable(
     billable: integer('billable', { mode: 'boolean' }).notNull().default(true),
     /** Set when an invoice includes this entry; empty means unbilled. */
     invoiceId: text('invoice_id'),
+    /** The invoice line this entry was rolled into (cleared with invoiceId). */
+    invoiceLineId: text('invoice_line_id'),
     createdById: text('created_by_id').references(() => user.id, { onDelete: 'set null' }),
     ...timestamps,
   },
@@ -209,4 +213,78 @@ export const workEntry = sqliteTable(
     index('work_entry_task_id_idx').on(t.taskId, t.workDate),
     index('work_entry_invoice_id_idx').on(t.invoiceId),
   ],
+);
+
+/*
+ * Invoices. A draft is private to the admin and freely editable. Sending
+ * assigns the next invoice number, locks the lines and shows it to the
+ * client. "Overdue" is not stored: it is a sent invoice past its due date.
+ */
+export const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'void'] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
+export const invoice = sqliteTable(
+  'invoice',
+  {
+    id: text('id').primaryKey(),
+    /** Running number, set when the invoice is sent; shown as prefix + number. */
+    number: integer('number').unique(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'restrict' }),
+    /** The project this invoice bills (optional for one-off invoices). */
+    projectId: text('project_id').references(() => project.id, { onDelete: 'restrict' }),
+    status: text('status', { enum: INVOICE_STATUSES }).notNull().default('draft'),
+    title: text('title'),
+    /** Billing address block, captured when the invoice is created. */
+    billTo: text('bill_to').notNull(),
+    /** Calendar dates, YYYY-MM-DD. */
+    issueDate: text('issue_date').notNull(),
+    dueDate: text('due_date').notNull(),
+    /** Only work logged on or before this date was pulled in (YYYY-MM-DD). */
+    workThrough: text('work_through'),
+    notes: text('notes'),
+    /** Tax rate in basis points (825 = 8.25%). */
+    taxRateBps: integer('tax_rate_bps').notNull().default(0),
+    /** Totals in cents, recalculated whenever lines change. */
+    subtotalCents: integer('subtotal_cents').notNull().default(0),
+    taxCents: integer('tax_cents').notNull().default(0),
+    totalCents: integer('total_cents').notNull().default(0),
+    sentAt: integer('sent_at', { mode: 'timestamp_ms' }),
+    /** Date the payment arrived, YYYY-MM-DD. */
+    paidDate: text('paid_date'),
+    voidedAt: integer('voided_at', { mode: 'timestamp_ms' }),
+    ...timestamps,
+  },
+  (t) => [
+    index('invoice_client_id_idx').on(t.clientId),
+    index('invoice_project_id_idx').on(t.projectId),
+  ],
+);
+
+export const INVOICE_LINE_KINDS = ['time', 'expense', 'custom'] as const;
+export type InvoiceLineKind = (typeof INVOICE_LINE_KINDS)[number];
+
+export const invoiceLine = sqliteTable(
+  'invoice_line',
+  {
+    id: text('id').primaryKey(),
+    invoiceId: text('invoice_id')
+      .notNull()
+      .references(() => invoice.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: INVOICE_LINE_KINDS }).notNull().default('custom'),
+    /** The task this line bills, for time and expense lines. */
+    taskId: text('task_id').references(() => task.id, { onDelete: 'set null' }),
+    description: text('description').notNull(),
+    /** Extra detail under the description, e.g. what was done and when. */
+    details: text('details'),
+    /** Quantity in hundredths (1.5 hours = 150). */
+    quantityHundredths: integer('quantity_hundredths').notNull().default(100),
+    unitCents: integer('unit_cents').notNull(),
+    /** round(quantity x unit price), in cents. */
+    amountCents: integer('amount_cents').notNull(),
+    position: integer('position').notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [index('invoice_line_invoice_id_idx').on(t.invoiceId, t.position)],
 );

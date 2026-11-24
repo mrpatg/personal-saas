@@ -7,6 +7,8 @@ import Button from '../../components/ui/Button.astro';
 import { adminNav } from '../../lib/nav';
 import { ROLES } from '../../lib/auth';
 import { getDb, schema } from '../../db';
+import { formatMoney } from '../../lib/work';
+import { outstanding } from '../../lib/invoices';
 
 const user = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
@@ -17,6 +19,7 @@ const [clients, disabled, activeProjects] = await Promise.all([
   count(and(eq(schema.user.role, ROLES.client), eq(schema.user.banned, true))),
   db.select({ n: sql<number>`count(*)` }).from(schema.project).where(eq(schema.project.status, 'active')).get().then((r) => r?.n ?? 0),
 ]);
+const owed = await outstanding();
 ---
 
 <AppLayout title="Admin" nav={adminNav} active="/admin" user={{ name: user.name, company: 'Admin' }} signOut>
@@ -36,10 +39,18 @@ const [clients, disabled, activeProjects] = await Promise.all([
       <p class="text-sm text-muted">Active projects</p>
       <p class="mt-2 font-display text-4xl">{activeProjects}</p>
     </Card>
+    <a href="/admin/invoices?status=open" class="col-span-2 block rounded-3xl transition hover:-translate-y-0.5 sm:col-span-3">
+      <Card>
+        <p class="text-sm text-muted">Outstanding invoices</p>
+        <p class="mt-2 font-display text-4xl">{formatMoney(owed.dueCents)}</p>
+        {owed.overdueCents > 0 && <p class="mt-1 text-sm text-rose-700">{formatMoney(owed.overdueCents)} overdue</p>}
+      </Card>
+    </a>
   </div>
 
   <div class="mt-8 flex flex-wrap gap-3">
     <Button href="/admin/projects">Manage projects</Button>
+    <Button href="/admin/invoices" variant="secondary">Invoices</Button>
     <Button href="/admin/clients" variant="secondary">Manage clients</Button>
   </div>
 </AppLayout>

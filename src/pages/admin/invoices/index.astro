@@ -1,0 +1,182 @@
+---
+/**
+ * Admin: all invoices, filterable by status, plus a form to start a new one.
+ * A new invoice for a project pulls in that project's unbilled time and costs.
+ */
+import { eq } from 'drizzle-orm';
+import AppLayout from '../../../layouts/AppLayout.astro';
+import Card from '../../../components/ui/Card.astro';
+import Button from '../../../components/ui/Button.astro';
+import StatusBadge from '../../../components/ui/StatusBadge.astro';
+import { inputClass, selectClass } from '../../../components/ui/forms';
+import { adminNav } from '../../../lib/nav';
+import { field } from '../../../lib/auth-helpers';
+import { allProjects, clientOptions, formatDate, parseDate } from '../../../lib/projects';
+import { formatMoney } from '../../../lib/work';
+import {
+  createDraft,
+  displayStatus,
+  invoiceName,
+  invoiceNumber,
+  invoiceStatus,
+  listInvoices,
+  outstanding,
+  todayISO,
+  unbilledByProject,
+  type InvoiceDisplayStatus,
+} from '../../../lib/invoices';
+import { getDb, schema } from '../../../db';
+
+const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
+const clients = await clientOptions();
+const projects = (await allProjects()).filter((p) => p.status !== 'archived');
+const unbilled = await unbilledByProject();
+
+let error = '';
+let draft = { projectId: Astro.url.searchParams.get('project') ?? '', clientId: '', title: '', workThrough: todayISO() };
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  draft = { projectId: field(form, 'projectId'), clientId: field(form, 'clientId'), title: field(form, 'title'), workThrough: field(form, 'workThrough') };
+  const project = draft.projectId ? projects.find((p) => p.id === draft.projectId) : undefined;
+  const clientId = project ? project.clientId : draft.clientId;
+  const client = clientId ? await getDb().select().from(schema.user).where(eq(schema.user.id, clientId)).get() : undefined;
+  const workThrough = parseDate(draft.workThrough) ?? todayISO();
+  if (draft.projectId && !project) error = 'Choose a valid project.';
+  else if (!client || client.role !== 'client') error = 'Choose a project, or a client for a one-off invoice.';
+  else {
+    const { id, lineCount } = await createDraft({ client, projectId: project?.id ?? null, title: draft.title || null, workThrough });
+    return Astro.redirect(`/admin/invoices/${id}?created=${lineCount}`, 303);
+  }
+  Astro.response.status = 400;
+}
+
+const filters: { key: string; label: string }[] = [
+  { key: '', label: 'All' },
+  { key: 'draft', label: 'Drafts' },
+  { key: 'open', label: 'Due' },
+  { key: 'paid', label: 'Paid' },
+  { key: 'void', label: 'Void' },
+];
+const filter = Astro.url.searchParams.get('status') ?? '';
+const today = todayISO();
+const rows = (await listInvoices()).filter(({ invoice: inv }) => {
+  const s: InvoiceDisplayStatus = displayStatus(inv, today);
+  if (filter === 'open') return s === 'sent' || s === 'overdue';
+  return filter ? inv.status === filter : true;
+});
+const owed = await outstanding();
+const totalUnbilled = [...unbilled.values()].reduce((a, b) => a + b, 0);
+const clientLabel = (c: { name: string; company: string | null }) => (c.company ? `${c.name} (${c.company})` : c.name);
+---
+
+<AppLayout title="Invoices" nav={adminNav} active="/admin/invoices" user={{ name: admin.name, company: 'Admin' }} signOut>
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <p class="text-sm text-muted">Admin</p>
+      <h1 class="font-display text-4xl sm:text-5xl">Invoices</h1>
+    </div>
+    <Button href="#new-invoice" variant="secondary">New invoice</Button>
+  </div>
+
+  {error && <p role="alert" class="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+
+  <div class="mt-8 grid grid-cols-2 gap-3 sm:max-w-2xl sm:grid-cols-3 sm:gap-4">
+    <Card>
+      <p class="text-sm text-muted">Outstanding</p>
+      <p class="mt-2 font-display text-3xl">{formatMoney(owed.dueCents)}</p>
+    </Card>
+    <Card>
+      <p class="text-sm text-muted">Overdue</p>
+      <p class={`mt-2 font-display text-3xl ${owed.overdueCents ? 'text-rose-700' : ''}`}>{formatMoney(owed.overdueCents)}</p>
+    </Card>
+    <Card class="col-span-2 sm:col-span-1">
+      <p class="text-sm text-muted">Not yet invoiced</p>
+      <p class="mt-2 font-display text-3xl">{formatMoney(totalUnbilled)}</p>
+    </Card>
+  </div>
+
+  <nav class="mt-10 flex flex-wrap gap-2" aria-label="Filter invoices">
+    {filters.map((f) => (
+      <a
+        href={f.key ? `/admin/invoices?status=${f.key}` : '/admin/invoices'}
+        aria-current={filter === f.key ? 'page' : undefined}
+        class={`rounded-full px-4 py-1.5 text-sm transition ${filter === f.key ? 'bg-primary text-primary-foreground' : 'text-muted ring-1 ring-line hover:text-ink'}`}
+      >{f.label}</a>
+    ))}
+  </nav>
+
+  <section class="mt-5">
+    {rows.length === 0 ? (
+      <Card><p class="text-muted">No invoices here yet.</p></Card>
+    ) : (
+      <Card padded={false} class="overflow-hidden">
+        <ul class="divide-y divide-line">
+          {rows.map(({ invoice: inv, clientName, projectName }) => {
+            const s = invoiceStatus[displayStatus(inv, today)];
+            return (
+              <li>
+                <a href={`/admin/invoices/${inv.id}`} class="flex items-center justify-between gap-4 px-5 py-4 transition hover:bg-primary-soft/50 sm:px-7">
+                  <div class="min-w-0">
+                    <p class="truncate font-medium">{invoiceName(inv)}</p>
+                    <p class="truncate text-xs text-muted">
+                      {invoiceNumber(inv)} · {clientName}{projectName ? ` · ${projectName}` : ''} · {inv.status === 'draft' ? `Created ${formatDate(inv.issueDate)}` : `Due ${formatDate(inv.dueDate)}`}
+                    </p>
+                  </div>
+                  <div class="flex shrink-0 items-center gap-3">
+                    <span class="hidden sm:inline"><StatusBadge tone={s.tone}>{s.label}</StatusBadge></span>
+                    <span class={`font-medium tabular-nums ${inv.status === 'void' ? 'text-muted line-through' : ''}`}>{formatMoney(inv.totalCents)}</span>
+                  </div>
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+    )}
+  </section>
+
+  <section id="new-invoice" class="mt-12 scroll-mt-24">
+    <Card class="max-w-2xl">
+      <h2 class="font-display text-3xl">New invoice</h2>
+      <p class="mt-1 text-sm text-muted">
+        Pick a project to pull in its unbilled time and costs. You can review and edit everything before sending.
+      </p>
+      {clients.length === 0 ? (
+        <p class="mt-4 text-sm text-muted">Add a client on the <a href="/admin/clients" class="text-primary hover:underline">Clients</a> page first.</p>
+      ) : (
+        <form method="post" class="mt-6 grid gap-4 sm:grid-cols-2">
+          <label class="block text-sm font-medium sm:col-span-2">
+            Project
+            <select name="projectId" class={selectClass}>
+              <option value="" selected={!draft.projectId}>No project (one-off invoice)</option>
+              {projects.map((p) => (
+                <option value={p.id} selected={p.id === draft.projectId}>
+                  {p.name} · {p.clientName}{unbilled.get(p.id) ? ` · ${formatMoney(unbilled.get(p.id)!)} unbilled` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="block text-sm font-medium sm:col-span-2">
+            Client <span class="font-normal text-muted">(only for a one-off invoice)</span>
+            <select name="clientId" class={selectClass}>
+              <option value="">Choose a client</option>
+              {clients.map((c) => <option value={c.id} selected={c.id === draft.clientId}>{clientLabel(c)}</option>)}
+            </select>
+          </label>
+          <label class="block text-sm font-medium">
+            Title <span class="font-normal text-muted">(optional)</span>
+            <input name="title" value={draft.title} maxlength="200" placeholder="e.g. December development" autocomplete="off" class={inputClass} />
+          </label>
+          <label class="block text-sm font-medium">
+            Include work through
+            <input type="date" name="workThrough" value={draft.workThrough} class={inputClass} />
+          </label>
+          <div class="sm:col-span-2">
+            <Button type="submit">Create draft</Button>
+          </div>
+        </form>
+      )}
+    </Card>
+  </section>
+</AppLayout>
