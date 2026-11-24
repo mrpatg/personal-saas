@@ -1,0 +1,317 @@
+---
+/**
+ * Admin: one project. Edit its details and status, and manage its tasks
+ * (add, edit, change status, reorder, delete). Every form posts back here and
+ * redirects afterwards, so refreshing never repeats an action.
+ */
+import { and, eq } from 'drizzle-orm';
+import AppLayout from '../../../layouts/AppLayout.astro';
+import Card from '../../../components/ui/Card.astro';
+import Button from '../../../components/ui/Button.astro';
+import StatusBadge from '../../../components/ui/StatusBadge.astro';
+import ProgressBar from '../../../components/ui/ProgressBar.astro';
+import { inputClass, selectClass, textareaClass } from '../../../components/ui/forms';
+import { adminNav } from '../../../lib/nav';
+import { field } from '../../../lib/auth-helpers';
+import {
+  PROJECT_STATUSES,
+  TASK_STATUSES,
+  countsFrom,
+  formatDate,
+  isProjectStatus,
+  isTaskStatus,
+  moveTask,
+  nextTaskPosition,
+  parseDate,
+  projectStatus,
+  projectTasks,
+  statusChange,
+  taskStatus,
+} from '../../../lib/projects';
+import { getDb, schema } from '../../../db';
+
+const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
+const db = getDb();
+const id = Astro.params.id ?? '';
+const here = `/admin/projects/${id}`;
+
+const row = await db
+  .select({ project: schema.project, clientName: schema.user.name, clientCompany: schema.user.company })
+  .from(schema.project)
+  .innerJoin(schema.user, eq(schema.project.clientId, schema.user.id))
+  .where(eq(schema.project.id, id))
+  .get();
+if (!row) return new Response('Project not found', { status: 404 });
+const project = row.project;
+
+let error = '';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const intent = field(form, 'intent');
+  let anchor = '';
+  let notice = '';
+
+  if (intent === 'update-project') {
+    const name = field(form, 'name');
+    const status = field(form, 'status');
+    if (!name) error = 'The project needs a name.';
+    else if (!isProjectStatus(status)) error = 'Choose a valid status.';
+    else {
+      await db
+        .update(schema.project)
+        .set({
+          name,
+          status,
+          description: field(form, 'description') || null,
+          startDate: parseDate(field(form, 'startDate')),
+          dueDate: parseDate(field(form, 'dueDate')),
+        })
+        .where(eq(schema.project.id, id))
+        .run();
+      notice = 'project-saved';
+    }
+  } else if (intent === 'delete-project') {
+    if (field(form, 'confirm') !== project.name) error = 'Type the project name exactly to delete it.';
+    else {
+      // Tasks are removed with it (ON DELETE CASCADE).
+      await db.delete(schema.project).where(eq(schema.project.id, id)).run();
+      return Astro.redirect('/admin/projects', 303);
+    }
+  } else if (intent === 'add-task') {
+    const title = field(form, 'title');
+    const status = field(form, 'status') || 'todo';
+    if (!title) error = 'The task needs a title.';
+    else if (!isTaskStatus(status)) error = 'Choose a valid status.';
+    else {
+      await db
+        .insert(schema.task)
+        .values({
+          id: crypto.randomUUID(),
+          projectId: id,
+          title,
+          notes: field(form, 'notes') || null,
+          status,
+          completedAt: status === 'done' ? new Date() : null,
+          position: await nextTaskPosition(id),
+        })
+        .run();
+      anchor = 'add-task';
+    }
+  } else {
+    // Everything else acts on one existing task in this project.
+    const t = await db
+      .select()
+      .from(schema.task)
+      .where(and(eq(schema.task.id, field(form, 'taskId')), eq(schema.task.projectId, id)))
+      .get();
+    if (!t) error = 'That task no longer exists.';
+    else if (intent === 'task-status' || intent === 'update-task') {
+      const status = field(form, 'status');
+      const title = intent === 'update-task' ? field(form, 'title') : t.title;
+      if (!isTaskStatus(status)) error = 'Choose a valid status.';
+      else if (!title) error = 'The task needs a title.';
+      else {
+        const changes = { ...statusChange(t, status), title };
+        if (intent === 'update-task') Object.assign(changes, { notes: field(form, 'notes') || null });
+        await db.update(schema.task).set(changes).where(eq(schema.task.id, t.id)).run();
+        anchor = `task-${t.id}`;
+      }
+    } else if (intent === 'move-up' || intent === 'move-down') {
+      await moveTask(t, intent === 'move-up' ? 'up' : 'down');
+      anchor = `task-${t.id}`;
+    } else if (intent === 'delete-task') {
+      await db.delete(schema.task).where(eq(schema.task.id, t.id)).run();
+      anchor = 'tasks';
+    } else error = 'Unknown action.';
+  }
+
+  if (!error) return Astro.redirect(`${here}${notice ? `?notice=${notice}` : ''}${anchor ? `#${anchor}` : ''}`, 303);
+  Astro.response.status = 400;
+}
+
+// Re-read after any change so the page shows the saved state.
+const current = (await db.select().from(schema.project).where(eq(schema.project.id, id)).get()) ?? project;
+const tasks = await projectTasks(id);
+const counts = countsFrom(tasks.length, tasks.filter((t) => t.status === 'done').length);
+const notice = {
+  'project-saved': 'Project details saved.',
+  created: 'Project created. Add its first tasks below.',
+}[Astro.url.searchParams.get('created') ? 'created' : (Astro.url.searchParams.get('notice') ?? '')];
+
+const smallSelect = 'h-9 rounded-full bg-canvas px-3 text-sm ring-1 ring-line outline-none focus:ring-2 focus:ring-primary';
+const iconButton =
+  'inline-flex h-9 w-9 items-center justify-center rounded-full text-muted ring-1 ring-line transition hover:text-ink hover:ring-primary/40 disabled:opacity-30 disabled:pointer-events-none';
+---
+
+<AppLayout title={current.name} nav={adminNav} active="/admin/projects" user={{ name: admin.name, company: 'Admin' }} signOut>
+  <a href="/admin/projects" class="text-sm text-muted hover:text-ink">← All projects</a>
+  <div class="mt-3 flex flex-wrap items-start justify-between gap-4">
+    <div class="min-w-0">
+      <h1 class="font-display text-4xl break-words sm:text-5xl">{current.name}</h1>
+      <p class="mt-1 text-sm text-muted">
+        For <a href={`/admin/projects?client=${current.clientId}`} class="text-primary hover:underline">{row.clientName}</a>{row.clientCompany ? ` · ${row.clientCompany}` : ''}
+      </p>
+    </div>
+    <StatusBadge tone={projectStatus[current.status].tone}>{projectStatus[current.status].label}</StatusBadge>
+  </div>
+
+  {error && <p role="alert" class="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+  {notice && <p role="status" class="mt-6 rounded-2xl bg-primary-soft px-4 py-3 text-sm text-primary">{notice}</p>}
+
+  <ProgressBar class="mt-6 max-w-xl" percent={counts.percent} label={`${counts.done} of ${counts.total} tasks done · ${counts.percent}%`} />
+
+  <!-- Tasks -->
+  <section id="tasks" class="mt-10 scroll-mt-24">
+    <h2 class="font-display text-3xl">Tasks</h2>
+    {tasks.length === 0 ? (
+      <Card class="mt-5"><p class="text-muted">No tasks yet. Add the first one below.</p></Card>
+    ) : (
+      <Card class="mt-5" padded={false}>
+        <ul class="divide-y divide-line">
+          {tasks.map((t, i) => (
+            <li id={`task-${t.id}`} class="scroll-mt-24 px-5 py-4 sm:px-7">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <p class={`font-medium break-words ${t.status === 'done' ? 'text-muted line-through decoration-line' : ''}`}>{t.title}</p>
+                  {t.notes && <p class="mt-0.5 text-sm whitespace-pre-line text-muted">{t.notes}</p>}
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <form method="post" class="flex items-center gap-1.5">
+                    <input type="hidden" name="intent" value="task-status" />
+                    <input type="hidden" name="taskId" value={t.id} />
+                    <label class="sr-only" for={`status-${t.id}`}>Status</label>
+                    <select id={`status-${t.id}`} name="status" class={smallSelect} onchange="this.form.submit()">
+                      {TASK_STATUSES.map((s) => <option value={s} selected={s === t.status}>{taskStatus[s].label}</option>)}
+                    </select>
+                    <noscript><Button type="submit" size="sm" variant="secondary">Save</Button></noscript>
+                  </form>
+                  <form method="post" class="flex items-center gap-1.5">
+                    <input type="hidden" name="taskId" value={t.id} />
+                    <button type="submit" name="intent" value="move-up" class={iconButton} disabled={i === 0} aria-label="Move up">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6" /></svg>
+                    </button>
+                    <button type="submit" name="intent" value="move-down" class={iconButton} disabled={i === tasks.length - 1} aria-label="Move down">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                    </button>
+                  </form>
+                </div>
+              </div>
+              <details class="mt-2">
+                <summary class="inline-flex cursor-pointer list-none text-sm text-primary hover:underline">Edit</summary>
+                <form method="post" class="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+                  <input type="hidden" name="taskId" value={t.id} />
+                  <label class="block text-sm font-medium">
+                    Title
+                    <input name="title" value={t.title} required maxlength="300" autocomplete="off" class={inputClass} />
+                  </label>
+                  <label class="block text-sm font-medium">
+                    Status
+                    <select name="status" class={selectClass}>
+                      {TASK_STATUSES.map((s) => <option value={s} selected={s === t.status}>{taskStatus[s].label}</option>)}
+                    </select>
+                  </label>
+                  <label class="block text-sm font-medium sm:col-span-2">
+                    Notes <span class="font-normal text-muted">(optional, the client sees these)</span>
+                    <textarea name="notes" rows="2" maxlength="4000" class={textareaClass}>{t.notes ?? ''}</textarea>
+                  </label>
+                  <div class="flex flex-wrap items-center justify-between gap-2 sm:col-span-2">
+                    <Button type="submit" size="sm" name="intent" value="update-task">Save task</Button>
+                    <button type="submit" name="intent" value="delete-task" formnovalidate class="rounded-full px-4 py-2 text-sm text-rose-700 transition hover:bg-rose-50">
+                      Delete task
+                    </button>
+                  </div>
+                </form>
+              </details>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    )}
+  </section>
+
+  <!-- Add task -->
+  <section id="add-task" class="mt-8 scroll-mt-24">
+    <Card class="max-w-2xl">
+      <h2 class="font-display text-2xl">Add a task</h2>
+      <form method="post" class="mt-5 grid gap-4 sm:grid-cols-[1fr_auto]">
+        <input type="hidden" name="intent" value="add-task" />
+        <label class="block text-sm font-medium">
+          Title
+          <input name="title" required maxlength="300" autocomplete="off" class={inputClass} />
+        </label>
+        <label class="block text-sm font-medium">
+          Status
+          <select name="status" class={selectClass}>
+            {TASK_STATUSES.map((s) => <option value={s}>{taskStatus[s].label}</option>)}
+          </select>
+        </label>
+        <label class="block text-sm font-medium sm:col-span-2">
+          Notes <span class="font-normal text-muted">(optional, the client sees these)</span>
+          <textarea name="notes" rows="2" maxlength="4000" class={textareaClass}></textarea>
+        </label>
+        <div class="sm:col-span-2">
+          <Button type="submit">Add task</Button>
+        </div>
+      </form>
+    </Card>
+  </section>
+
+  <!-- Project details -->
+  <section id="details" class="mt-12 scroll-mt-24">
+    <Card class="max-w-2xl">
+      <h2 class="font-display text-2xl">Project details</h2>
+      <form method="post" class="mt-5 grid gap-4 sm:grid-cols-2">
+        <input type="hidden" name="intent" value="update-project" />
+        <label class="block text-sm font-medium sm:col-span-2">
+          Name
+          <input name="name" value={current.name} required maxlength="200" autocomplete="off" class={inputClass} />
+        </label>
+        <label class="block text-sm font-medium sm:col-span-2">
+          Description <span class="font-normal text-muted">(the client sees this)</span>
+          <textarea name="description" rows="3" maxlength="4000" class={textareaClass}>{current.description ?? ''}</textarea>
+        </label>
+        <label class="block text-sm font-medium">
+          Start date
+          <input type="date" name="startDate" value={current.startDate ?? ''} class={inputClass} />
+        </label>
+        <label class="block text-sm font-medium">
+          Due date
+          <input type="date" name="dueDate" value={current.dueDate ?? ''} class={inputClass} />
+        </label>
+        <label class="block text-sm font-medium sm:col-span-2">
+          Status
+          <select name="status" class={selectClass}>
+            {PROJECT_STATUSES.map((s) => <option value={s} selected={s === current.status}>{projectStatus[s].label}</option>)}
+          </select>
+          <span class="mt-1.5 block text-xs font-normal text-muted">Archived projects are hidden from the client.</span>
+        </label>
+        <div class="sm:col-span-2">
+          <Button type="submit">Save details</Button>
+        </div>
+      </form>
+      <p class="mt-5 text-xs text-muted">
+        Created {new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(current.createdAt)}
+        {current.dueDate && <> · Due {formatDate(current.dueDate)}</>}
+      </p>
+    </Card>
+  </section>
+
+  <!-- Danger zone -->
+  <section class="mt-8">
+    <details class="max-w-2xl rounded-3xl p-5 ring-1 ring-rose-200 sm:p-7">
+      <summary class="cursor-pointer list-none text-sm font-medium text-rose-700">Delete this project…</summary>
+      <p class="mt-3 text-sm text-muted">
+        This permanently removes the project and all {tasks.length} of its tasks. To hide it from the client but keep the history, set its status to Archived instead.
+      </p>
+      <form method="post" class="mt-4 flex flex-wrap items-end gap-2">
+        <input type="hidden" name="intent" value="delete-project" />
+        <label class="block min-w-0 flex-1 text-sm">
+          <span class="text-muted">Type <span class="font-medium text-ink">{current.name}</span> to confirm</span>
+          <input name="confirm" required autocomplete="off" class={inputClass} />
+        </label>
+        <button type="submit" class="h-11 rounded-full bg-rose-700 px-5 text-[15px] font-medium text-white transition hover:brightness-110">Delete project</button>
+      </form>
+    </details>
+  </section>
+</AppLayout>
