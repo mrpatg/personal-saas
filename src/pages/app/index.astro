@@ -1,23 +1,59 @@
 ---
-/** Client home. Projects, tasks and invoices arrive with those features. */
+/** Client home: a summary of their projects. Invoices arrive with that feature. */
 import AppLayout from '../../layouts/AppLayout.astro';
 import Card from '../../components/ui/Card.astro';
+import ProjectSummaryCard from '../../components/ProjectSummaryCard.astro';
 import { clientNav } from '../../lib/nav';
+import { clientProjects, openTaskCount } from '../../lib/projects';
 import { site } from '../../config/site';
 
 const user = Astro.locals.user!; // guaranteed by src/middleware.ts
 const firstName = user.name.split(' ')[0];
+const projects = await clientProjects(user.id);
+const active = projects.filter((p) => p.status === 'active');
+const openTasks = openTaskCount(active);
 ---
 
 <AppLayout title="Overview" nav={clientNav} active="/app" user={{ name: user.name, company: user.company ?? undefined }} signOut>
   <p class="text-sm text-muted">Welcome,</p>
   <h1 class="font-display text-4xl sm:text-5xl">{firstName}</h1>
 
-  <Card class="mt-8 max-w-2xl">
-    <h2 class="font-display text-2xl">Your projects will appear here</h2>
-    <p class="mt-2 leading-relaxed text-muted">
-      Project progress, tasks and invoices are on their way. In the meantime, reach out any time at{" "}
-      <a href={`mailto:${site.contactEmail}`} class="text-primary hover:underline">{site.contactEmail}</a>.
-    </p>
-  </Card>
+  {projects.length === 0 ? (
+    <Card class="mt-8 max-w-2xl">
+      <h2 class="font-display text-2xl">Your projects will appear here</h2>
+      <p class="mt-2 leading-relaxed text-muted">
+        Once work is underway you'll see each project and its progress here. In the meantime, reach out any time at{' '}
+        <a href={`mailto:${site.contactEmail}`} class="text-primary hover:underline">{site.contactEmail}</a>.
+      </p>
+    </Card>
+  ) : (
+    <>
+      <div class="mt-8 grid grid-cols-2 gap-3 sm:max-w-xl sm:gap-4">
+        <Card>
+          <p class="text-sm text-muted">Active projects</p>
+          <p class="mt-2 font-display text-4xl">{active.length}</p>
+        </Card>
+        <Card>
+          <p class="text-sm text-muted">Open tasks</p>
+          <p class="mt-2 font-display text-4xl">{openTasks}</p>
+        </Card>
+      </div>
+
+      <section class="mt-12">
+        <div class="flex items-center justify-between gap-4">
+          <h2 class="font-display text-3xl">Active projects</h2>
+          <a href="/app/projects" class="text-sm text-primary hover:underline">View all</a>
+        </div>
+        {active.length === 0 ? (
+          <Card class="mt-5"><p class="text-muted">Nothing active right now. Past projects are under <a href="/app/projects" class="text-primary hover:underline">Projects</a>.</p></Card>
+        ) : (
+          <ul class="mt-5 grid gap-5 xl:grid-cols-2">
+            {active.map((p) => (
+              <li><ProjectSummaryCard project={p} href={`/app/projects/${p.id}`} /></li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  )}
 </AppLayout>
