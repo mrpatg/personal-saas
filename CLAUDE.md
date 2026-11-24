@@ -81,19 +81,24 @@ drizzle.config.ts     # drizzle-kit config
 | Build | `npm run build` |
 | Run the production build locally | `npm run preview` |
 | Deploy to Cloudflare | `npm run deploy` |
+| CI deploy (migrate remote D1, then deploy) | `npm run deploy:ci` |
 | Generate a migration from schema changes | `npm run db:generate` |
 | Apply migrations to local D1 | `npm run db:migrate:local` |
 | Apply migrations to production D1 | `npm run db:migrate:remote` |
 | Regenerate binding types | `npm run cf-typegen` |
 
 Health check: `GET /health` returns `{"status":"ok","db":"ok","migrated":true}`.
+If any file in `migrations/` hasn't been applied, it returns 503 with
+`"migrated":false` and a `"pending"` list.
 
 ## Deployment notes
 
-- Intended setup: Cloudflare Workers Builds connected to `main` (dashboard → Worker →
-  Settings → Builds). Build command `npm run build`; deploy command
-  `npx wrangler d1 migrations apply DB --remote && npx wrangler deploy`.
-  Every push to `main` deploys, so keep `main` working.
+- Cloudflare Workers Builds is connected to `main` (dashboard → Worker →
+  Settings → Build). Build command `npm run build`; **deploy command
+  `npm run deploy:ci`**, which applies pending D1 migrations and then deploys.
+  If the deploy command is plain `npx wrangler deploy`, new tables never reach
+  production and pages fail with `no such table`. Every push to `main`
+  deploys, so keep `main` working.
 - Secrets: `BETTER_AUTH_SECRET` (set with `npx wrangler secret put`). Var:
   `AUTH_HOSTS` in `wrangler.jsonc` lists custom domains; localhost and
   `*.workers.dev` are always allowed.
