@@ -13,13 +13,13 @@ import { adminNav } from '../../lib/nav';
 import { getAuth, ROLES } from '../../lib/auth';
 import { authErrorMessage, field, generatePassword } from '../../lib/auth-helpers';
 import { getDb, schema } from '../../db';
+import { inputClass } from '../../components/ui/forms';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
 const headers = Astro.request.headers;
 
-const input =
-  'mt-1.5 block h-11 w-full rounded-2xl bg-canvas px-4 text-[15px] ring-1 ring-line transition outline-none placeholder:text-muted/70 focus:ring-2 focus:ring-primary';
+const input = inputClass;
 
 /** Shown once after creating a client or resetting a password. */
 let credentials: { title: string; email: string; password: string } | null = null;
@@ -145,6 +145,7 @@ const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric
                     <Button type="submit" size="sm">Set password</Button>
                   </form>
                 </details>
+                <Button href={`/admin/projects?client=${c.id}`} size="sm" variant="ghost">Projects</Button>
                 <form method="post">
                   <input type="hidden" name="userId" value={c.id} />
                   {c.banned ? (

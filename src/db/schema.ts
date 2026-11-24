@@ -94,3 +94,57 @@ export const verification = sqliteTable(
   },
   (t) => [index('verification_identifier_idx').on(t.identifier)],
 );
+
+/*
+ * Projects and tasks. An admin creates projects for a client; the client
+ * sees their own projects read-only.
+ *
+ * Invoicing plan (not built yet): hours and costs will not live on tasks.
+ * A future `work_entry` table will hold billable work per task (hours x rate
+ * or a flat amount, in cents) with a nullable `invoice_id`. An invoice for a
+ * project claims every entry whose invoice_id is still empty, so several
+ * invoices can cover one project over time without double-billing.
+ */
+export const PROJECT_STATUSES = ['active', 'on_hold', 'completed', 'archived'] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
+export const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done'] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+export const project = sqliteTable(
+  'project',
+  {
+    id: text('id').primaryKey(),
+    /** The client (a user with role "client") this project belongs to. */
+    clientId: text('client_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'restrict' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    status: text('status', { enum: PROJECT_STATUSES }).notNull().default('active'),
+    /** Calendar dates as YYYY-MM-DD (no time zone). */
+    startDate: text('start_date'),
+    dueDate: text('due_date'),
+    ...timestamps,
+  },
+  (t) => [index('project_client_id_idx').on(t.clientId)],
+);
+
+export const task = sqliteTable(
+  'task',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    notes: text('notes'),
+    status: text('status', { enum: TASK_STATUSES }).notNull().default('todo'),
+    /** Sort order within the project, lowest first. */
+    position: integer('position').notNull().default(0),
+    /** Set when the task moves to "done", cleared if it moves back. */
+    completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
+    ...timestamps,
+  },
+  (t) => [index('task_project_id_idx').on(t.projectId, t.position)],
+);

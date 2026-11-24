@@ -1,0 +1,24 @@
+---
+/** Thin progress bar with an optional caption, e.g. "7 of 12 tasks done". */
+interface Props {
+  percent: number;
+  label?: string;
+  class?: string;
+}
+const { percent, label, class: extra = '' } = Astro.props;
+const value = Math.max(0, Math.min(100, Math.round(percent)));
+---
+
+<div class={extra}>
+  <div
+    class="h-1.5 overflow-hidden rounded-full bg-line"
+    role="progressbar"
+    aria-valuemin="0"
+    aria-valuemax="100"
+    aria-valuenow={value}
+    aria-label={label ?? 'Progress'}
+  >
+    <div class="h-full rounded-full bg-primary" style={`width: ${value}%`}></div>
+  </div>
+  {label && <p class="mt-2 text-xs text-muted">{label}</p>}
+</div>
