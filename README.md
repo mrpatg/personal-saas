@@ -45,6 +45,11 @@ npx wrangler secret put BETTER_AUTH_SECRET     # paste the output of: openssl ra
 npm run deploy                                 # build and upload; prints your live URL
 ```
 
+For automatic deploys, connect the repo in the Cloudflare dashboard
+(Worker → Settings → Build) with build command `npm run build` and deploy
+command `npm run deploy:ci`. That applies new database migrations before
+each deploy.
+
 Then open `/setup` on the live site to create the admin account. If the site
 uses a custom domain, add it to `AUTH_HOSTS` in `wrangler.jsonc`.
 
