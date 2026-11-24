@@ -1,0 +1,314 @@
+---
+/**
+ * Admin: one task. Edit it, talk with the client in comments, and log
+ * billable time and costs (work entries) that future invoices will pick up.
+ */
+import { eq } from 'drizzle-orm';
+import AppLayout from '../../../layouts/AppLayout.astro';
+import Card from '../../../components/ui/Card.astro';
+import Button from '../../../components/ui/Button.astro';
+import StatusBadge from '../../../components/ui/StatusBadge.astro';
+import CommentThread from '../../../components/CommentThread.astro';
+import { inputClass, selectClass, textareaClass } from '../../../components/ui/forms';
+import { adminNav } from '../../../lib/nav';
+import { field } from '../../../lib/auth-helpers';
+import { TASK_STATUSES, formatDate, isTaskStatus, parseDate, statusChange, taskStatus } from '../../../lib/projects';
+import {
+  addComment,
+  centsToInput,
+  formatHours,
+  formatMoney,
+  parseDuration,
+  parseMoney,
+  taskComments,
+  taskEntries,
+  timeAmount,
+  totalsOf,
+} from '../../../lib/work';
+import { getDb, schema } from '../../../db';
+
+const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
+const db = getDb();
+const id = Astro.params.id ?? '';
+const here = `/admin/tasks/${id}`;
+
+const row = await db
+  .select({ task: schema.task, project: schema.project, clientName: schema.user.name })
+  .from(schema.task)
+  .innerJoin(schema.project, eq(schema.task.projectId, schema.project.id))
+  .innerJoin(schema.user, eq(schema.project.clientId, schema.user.id))
+  .where(eq(schema.task.id, id))
+  .get();
+if (!row) return new Response('Task not found', { status: 404 });
+const { task, project } = row;
+const projectHref = `/admin/projects/${project.id}`;
+
+const today = new Date().toISOString().slice(0, 10);
+let error = '';
+let commentDraft = '';
+let timeDraft = { workDate: today, hours: '', rate: centsToInput(project.hourlyRateCents), description: '', billable: true };
+let costDraft = { workDate: today, amount: '', description: '', billable: true };
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const intent = field(form, 'intent');
+  let anchor = '';
+
+  if (intent === 'update-task') {
+    const title = field(form, 'title');
+    const status = field(form, 'status');
+    if (!title) error = 'The task needs a title.';
+    else if (!isTaskStatus(status)) error = 'Choose a valid status.';
+    else {
+      await db
+        .update(schema.task)
+        .set({ ...statusChange(task, status), title, notes: field(form, 'notes') || null })
+        .where(eq(schema.task.id, id))
+        .run();
+      anchor = 'details';
+    }
+  } else if (intent === 'delete-task') {
+    const entries = await taskEntries(id);
+    if (entries.length) error = 'This task has time or costs logged. Delete those entries first, or leave the task in place.';
+    else {
+      await db.delete(schema.task).where(eq(schema.task.id, id)).run();
+      return Astro.redirect(`${projectHref}#tasks`, 303);
+    }
+  } else if (intent === 'comment') {
+    commentDraft = field(form, 'body');
+    error = (await addComment(id, admin.id, commentDraft)) ?? '';
+    anchor = 'comments';
+  } else if (intent === 'add-time') {
+    timeDraft = {
+      workDate: field(form, 'workDate'),
+      hours: field(form, 'hours'),
+      rate: field(form, 'rate'),
+      description: field(form, 'description'),
+      billable: form.get('billable') === 'on',
+    };
+    const workDate = parseDate(timeDraft.workDate);
+    const minutes = parseDuration(timeDraft.hours);
+    const rateCents = timeDraft.rate ? parseMoney(timeDraft.rate) : 0;
+    if (!workDate) error = 'Choose the date the work was done.';
+    else if (!minutes) error = 'Enter the time as hours (1.5), hours and minutes (1:30) or minutes (90m).';
+    else if (rateCents == null) error = 'Enter the hourly rate as a number, e.g. 150.';
+    else {
+      await db
+        .insert(schema.workEntry)
+        .values({
+          id: crypto.randomUUID(),
+          taskId: id,
+          kind: 'time',
+          workDate,
+          minutes,
+          rateCents,
+          amountCents: timeAmount(minutes, rateCents),
+          description: timeDraft.description || null,
+          billable: timeDraft.billable,
+          createdById: admin.id,
+        })
+        .run();
+      anchor = 'work';
+    }
+  } else if (intent === 'add-cost') {
+    costDraft = {
+      workDate: field(form, 'workDate'),
+      amount: field(form, 'amount'),
+      description: field(form, 'description'),
+      billable: form.get('billable') === 'on',
+    };
+    const workDate = parseDate(costDraft.workDate);
+    const amountCents = parseMoney(costDraft.amount);
+    if (!workDate) error = 'Choose the date of the cost.';
+    else if (!amountCents) error = 'Enter the amount, e.g. 49.99.';
+    else if (!costDraft.description) error = 'Say what the cost was for.';
+    else {
+      await db
+        .insert(schema.workEntry)
+        .values({
+          id: crypto.randomUUID(),
+          taskId: id,
+          kind: 'expense',
+          workDate,
+          amountCents,
+          description: costDraft.description,
+          billable: costDraft.billable,
+          createdById: admin.id,
+        })
+        .run();
+      anchor = 'work';
+    }
+  } else if (intent === 'delete-entry') {
+    const entry = await db.select().from(schema.workEntry).where(eq(schema.workEntry.id, field(form, 'entryId'))).get();
+    if (!entry || entry.taskId !== id) error = 'That entry no longer exists.';
+    else if (entry.invoiceId) error = 'That entry is on an invoice, so it can no longer be deleted.';
+    else {
+      await db.delete(schema.workEntry).where(eq(schema.workEntry.id, entry.id)).run();
+      anchor = 'work';
+    }
+  } else error = 'Unknown action.';
+
+  if (!error) return Astro.redirect(`${here}${anchor ? `#${anchor}` : ''}`, 303);
+  Astro.response.status = 400;
+}
+
+const current = (await db.select().from(schema.task).where(eq(schema.task.id, id)).get()) ?? task;
+const [comments, entries] = await Promise.all([taskComments(id), taskEntries(id)]);
+const totals = totalsOf(entries);
+const checkbox = 'h-4 w-4 rounded accent-primary';
+---
+
+<AppLayout title={current.title} nav={adminNav} active="/admin/projects" user={{ name: admin.name, company: 'Admin' }} signOut>
+  <a href={projectHref} class="text-sm text-muted hover:text-ink">← {project.name}</a>
+  <div class="mt-3 flex flex-wrap items-start justify-between gap-4">
+    <div class="min-w-0">
+      <h1 class="font-display text-4xl break-words sm:text-5xl">{current.title}</h1>
+      <p class="mt-1 text-sm text-muted">{row.clientName} · {project.name}</p>
+    </div>
+    <StatusBadge tone={taskStatus[current.status].tone}>{taskStatus[current.status].label}</StatusBadge>
+  </div>
+  {current.notes && <p class="mt-4 max-w-2xl leading-relaxed whitespace-pre-line">{current.notes}</p>}
+
+  {error && <p role="alert" class="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+
+  <div class="mt-8 grid grid-cols-2 gap-3 sm:max-w-2xl sm:grid-cols-3 sm:gap-4">
+    <Card>
+      <p class="text-sm text-muted">Time logged</p>
+      <p class="mt-2 font-display text-3xl">{formatHours(totals.minutes)}</p>
+    </Card>
+    <Card>
+      <p class="text-sm text-muted">Billable</p>
+      <p class="mt-2 font-display text-3xl">{formatMoney(totals.billableCents)}</p>
+    </Card>
+    <Card class="col-span-2 sm:col-span-1">
+      <p class="text-sm text-muted">Not yet invoiced</p>
+      <p class="mt-2 font-display text-3xl">{formatMoney(totals.unbilledCents)}</p>
+    </Card>
+  </div>
+
+  <div class="mt-10 grid gap-10 xl:grid-cols-2 xl:items-start">
+    <CommentThread comments={comments} viewerId={admin.id} draft={commentDraft} placeholder="Ask the client a question or share an update…" />
+
+    <!-- Time and costs -->
+    <section id="work" class="scroll-mt-24">
+      <h2 class="font-display text-3xl">Time and costs</h2>
+      <p class="mt-1 text-sm text-muted">Only you can see these. They'll be picked up by the next invoice for this project.</p>
+      <Card class="mt-5" padded={false}>
+        {entries.length === 0 ? (
+          <p class="px-5 py-5 text-sm text-muted sm:px-7">Nothing logged yet.</p>
+        ) : (
+          <ul class="divide-y divide-line">
+            {entries.map((e) => (
+              <li class="flex items-start justify-between gap-3 px-5 py-4 sm:px-7">
+                <div class="min-w-0">
+                  <p class="text-sm font-medium">
+                    {e.kind === 'time' ? `${formatHours(e.minutes ?? 0)} @ ${formatMoney(e.rateCents ?? 0)}/h` : 'Cost'}
+                    <span class="font-normal text-muted"> · {formatDate(e.workDate)}</span>
+                  </p>
+                  {e.description && <p class="mt-0.5 text-sm break-words text-muted">{e.description}</p>}
+                  <p class="mt-1 flex flex-wrap gap-1.5">
+                    {!e.billable && <StatusBadge>Not billable</StatusBadge>}
+                    {e.invoiceId && <StatusBadge tone="success">Invoiced</StatusBadge>}
+                  </p>
+                </div>
+                <div class="flex shrink-0 flex-col items-end gap-1">
+                  <span class={`font-medium tabular-nums ${e.billable ? '' : 'text-muted line-through decoration-line'}`}>{formatMoney(e.amountCents)}</span>
+                  {!e.invoiceId && (
+                    <form method="post">
+                      <input type="hidden" name="intent" value="delete-entry" />
+                      <input type="hidden" name="entryId" value={e.id} />
+                      <button type="submit" class="text-xs text-muted hover:text-rose-700">Delete</button>
+                    </form>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <details class="mt-5 rounded-3xl bg-surface p-5 ring-1 ring-line shadow-soft sm:p-7" open>
+        <summary class="cursor-pointer list-none font-display text-2xl">Log time</summary>
+        <form method="post" class="mt-4 grid grid-cols-2 gap-4">
+          <input type="hidden" name="intent" value="add-time" />
+          <label class="col-span-2 block text-sm font-medium sm:col-span-1">
+            Date
+            <input type="date" name="workDate" value={timeDraft.workDate} required class={inputClass} />
+          </label>
+          <label class="block text-sm font-medium">
+            Hours
+            <input name="hours" value={timeDraft.hours} required placeholder="1.5 or 1:30" inputmode="decimal" autocomplete="off" class={inputClass} />
+          </label>
+          <label class="block text-sm font-medium">
+            Rate / hour
+            <input name="rate" value={timeDraft.rate} placeholder="150.00" inputmode="decimal" autocomplete="off" class={inputClass} />
+          </label>
+          <label class="col-span-2 block text-sm font-medium">
+            What was done <span class="font-normal text-muted">(shows on the invoice)</span>
+            <input name="description" value={timeDraft.description} maxlength="500" autocomplete="off" class={inputClass} />
+          </label>
+          <label class="col-span-2 flex items-center gap-2 text-sm">
+            <input type="checkbox" name="billable" checked={timeDraft.billable} class={checkbox} /> Billable
+          </label>
+          <div class="col-span-2"><Button type="submit" size="sm">Log time</Button></div>
+        </form>
+        {!project.hourlyRateCents && (
+          <p class="mt-3 text-xs text-muted">Tip: set a default hourly rate on the <a href={`${projectHref}#details`} class="text-primary hover:underline">project</a> to fill this in automatically.</p>
+        )}
+      </details>
+
+      <details class="mt-4 rounded-3xl bg-surface p-5 ring-1 ring-line shadow-soft sm:p-7" open={costDraft.amount !== ''}>
+        <summary class="cursor-pointer list-none font-display text-2xl">Add a cost</summary>
+        <form method="post" class="mt-4 grid grid-cols-2 gap-4">
+          <input type="hidden" name="intent" value="add-cost" />
+          <label class="block text-sm font-medium">
+            Date
+            <input type="date" name="workDate" value={costDraft.workDate} required class={inputClass} />
+          </label>
+          <label class="block text-sm font-medium">
+            Amount
+            <input name="amount" value={costDraft.amount} required placeholder="49.99" inputmode="decimal" autocomplete="off" class={inputClass} />
+          </label>
+          <label class="col-span-2 block text-sm font-medium">
+            What it was for <span class="font-normal text-muted">(shows on the invoice)</span>
+            <input name="description" value={costDraft.description} required maxlength="500" placeholder="Hosting, software license, …" autocomplete="off" class={inputClass} />
+          </label>
+          <label class="col-span-2 flex items-center gap-2 text-sm">
+            <input type="checkbox" name="billable" checked={costDraft.billable} class={checkbox} /> Billable
+          </label>
+          <div class="col-span-2"><Button type="submit" size="sm">Add cost</Button></div>
+        </form>
+      </details>
+    </section>
+  </div>
+
+  <!-- Task details -->
+  <section id="details" class="mt-12 scroll-mt-24">
+    <Card class="max-w-2xl">
+      <h2 class="font-display text-2xl">Task details</h2>
+      <form method="post" class="mt-5 grid gap-4 sm:grid-cols-[1fr_auto]">
+        <label class="block text-sm font-medium">
+          Title
+          <input name="title" value={current.title} required maxlength="300" autocomplete="off" class={inputClass} />
+        </label>
+        <label class="block text-sm font-medium">
+          Status
+          <select name="status" class={selectClass}>
+            {TASK_STATUSES.map((s) => <option value={s} selected={s === current.status}>{taskStatus[s].label}</option>)}
+          </select>
+        </label>
+        <label class="block text-sm font-medium sm:col-span-2">
+          Notes <span class="font-normal text-muted">(the client sees these)</span>
+          <textarea name="notes" rows="3" maxlength="4000" class={textareaClass}>{current.notes ?? ''}</textarea>
+        </label>
+        <div class="flex flex-wrap items-center justify-between gap-2 sm:col-span-2">
+          <Button type="submit" name="intent" value="update-task">Save task</Button>
+          <button type="submit" name="intent" value="delete-task" formnovalidate class="rounded-full px-4 py-2 text-sm text-rose-700 transition hover:bg-rose-50">
+            Delete task
+          </button>
+        </div>
+      </form>
+      {current.completedAt && <p class="mt-4 text-xs text-muted">Completed {new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(current.completedAt)}</p>}
+    </Card>
+  </section>
+</AppLayout>

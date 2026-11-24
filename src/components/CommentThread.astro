@@ -1,0 +1,73 @@
+---
+/**
+ * Comments on a task plus a form to add one. Used on both the admin and the
+ * client task screens; the form posts back to the page with intent="comment".
+ */
+import Card from './ui/Card.astro';
+import Button from './ui/Button.astro';
+import { textareaClass } from './ui/forms';
+import { MAX_COMMENT_LENGTH, type TaskComment } from '../lib/work';
+import { ROLES } from '../lib/auth';
+
+interface Props {
+  comments: TaskComment[];
+  /** The signed-in user, so their own comments read "You". */
+  viewerId: string;
+  /** Text kept in the box after a failed post. */
+  draft?: string;
+  placeholder?: string;
+}
+const { comments, viewerId, draft = '', placeholder = 'Write a comment…' } = Astro.props;
+
+const initials = (name: string) =>
+  name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+// Rendered in UTC on the server; the script below switches to the viewer's own time zone.
+const fallbackFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short' });
+---
+
+<section id="comments" class="scroll-mt-24">
+  <h2 class="font-display text-3xl">Comments</h2>
+  <Card class="mt-5">
+    {comments.length === 0 ? (
+      <p class="text-sm text-muted">No comments yet. Questions and decisions about this task go here.</p>
+    ) : (
+      <ol class="space-y-6">
+        {comments.map((c) => (
+          <li id={`comment-${c.id}`} class="flex gap-3 sm:gap-4">
+            <span
+              class={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
+                c.authorRole === ROLES.admin ? 'bg-primary text-primary-foreground' : 'bg-primary-soft text-primary'
+              }`}
+              aria-hidden="true"
+            >
+              {initials(c.authorName)}
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm">
+                <span class="font-medium">{c.authorId === viewerId ? 'You' : c.authorName}</span>
+                <span class="text-muted"> · <time datetime={c.createdAt.toISOString()} data-local-time>{fallbackFmt.format(c.createdAt)}</time></span>
+              </p>
+              <p class="mt-1 leading-relaxed break-words whitespace-pre-line">{c.body}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    )}
+
+    <form method="post" class={comments.length ? 'mt-6 border-t border-line/70 pt-6' : 'mt-4'}>
+      <input type="hidden" name="intent" value="comment" />
+      <label for="comment-body" class="sr-only">Comment</label>
+      <textarea id="comment-body" name="body" rows="3" required maxlength={MAX_COMMENT_LENGTH} placeholder={placeholder} class={textareaClass}>{draft}</textarea>
+      <div class="mt-3">
+        <Button type="submit" size="sm">Post comment</Button>
+      </div>
+    </form>
+  </Card>
+</section>
+
+<script>
+  const fmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  document.querySelectorAll<HTMLTimeElement>('time[data-local-time]').forEach((el) => {
+    el.textContent = fmt.format(new Date(el.dateTime));
+  });
+</script>
