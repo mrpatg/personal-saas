@@ -24,6 +24,9 @@ export interface SiteConfig {
   description: string;
   /** Public contact address shown to clients. */
   contactEmail: string;
+  /** Billing currency (ISO 4217 code, e.g. "USD") and the locale money is formatted in. */
+  currency: string;
+  locale: string;
   /**
    * Theme colors (any CSS color). They become CSS variables and Tailwind
    * colors: `bg-primary`, `text-primary-foreground`, `bg-canvas`, `text-ink`.
@@ -61,6 +64,8 @@ export const site: SiteConfig = {
   tagline: 'Project progress, conversations and invoices, all in one place.',
   description: 'Software development consulting for the people making technology decisions.',
   contactEmail,
+  currency: 'USD',
+  locale: 'en-US',
   colors: {
     primary: '#1f4d3a', // forest green
     primaryForeground: '#f7f5ef',
