@@ -8,7 +8,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import Logo from '../components/Logo.astro';
 import Button from '../components/ui/Button.astro';
 import { site } from '../config/site';
-import { auth, homeFor } from '../lib/auth';
+import { getAuth, homeFor } from '../lib/auth';
 import { authErrorMessage, field, redirectWithCookies, safeRedirect } from '../lib/auth-helpers';
 import { getDb, schema } from '../db';
 
@@ -28,7 +28,7 @@ if (Astro.request.method === 'POST') {
   email = field(form, 'email');
   const password = form.get('password');
   try {
-    const { headers, response } = await auth.api.signInEmail({
+    const { headers, response } = await getAuth().api.signInEmail({
       body: { email, password: typeof password === 'string' ? password : '', rememberMe: true },
       headers: Astro.request.headers,
       returnHeaders: true,

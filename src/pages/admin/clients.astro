@@ -10,7 +10,7 @@ import Card from '../../components/ui/Card.astro';
 import Button from '../../components/ui/Button.astro';
 import StatusBadge from '../../components/ui/StatusBadge.astro';
 import { adminNav } from '../../lib/nav';
-import { auth, ROLES } from '../../lib/auth';
+import { getAuth, ROLES } from '../../lib/auth';
 import { authErrorMessage, field, generatePassword } from '../../lib/auth-helpers';
 import { getDb, schema } from '../../db';
 
@@ -34,7 +34,7 @@ if (Astro.request.method === 'POST') {
     if (intent === 'create') {
       draft = { name: field(form, 'name'), company: field(form, 'company'), email: field(form, 'email') };
       const password = field(form, 'password') || generatePassword();
-      await auth.api.createUser({
+      await getAuth().api.createUser({
         headers,
         body: {
           name: draft.name,
@@ -53,14 +53,14 @@ if (Astro.request.method === 'POST') {
 
       if (intent === 'reset-password') {
         const password = field(form, 'password') || generatePassword();
-        await auth.api.setUserPassword({ headers, body: { userId: target.id, newPassword: password } });
-        await auth.api.revokeUserSessions({ headers, body: { userId: target.id } });
+        await getAuth().api.setUserPassword({ headers, body: { userId: target.id, newPassword: password } });
+        await getAuth().api.revokeUserSessions({ headers, body: { userId: target.id } });
         credentials = { title: `New password for ${target.name}`, email: target.email, password };
       } else if (intent === 'disable') {
-        await auth.api.banUser({ headers, body: { userId: target.id, banReason: 'Disabled by admin' } });
+        await getAuth().api.banUser({ headers, body: { userId: target.id, banReason: 'Disabled by admin' } });
         notice = `${target.name}'s account is disabled and they have been signed out.`;
       } else if (intent === 'enable') {
-        await auth.api.unbanUser({ headers, body: { userId: target.id } });
+        await getAuth().api.unbanUser({ headers, body: { userId: target.id } });
         notice = `${target.name}'s account is active again.`;
       } else {
         throw new Error('Unknown action.');

@@ -1,5 +1,5 @@
 import { defineMiddleware } from 'astro:middleware';
-import { auth, homeFor, ROLES } from './lib/auth';
+import { getAuth, homeFor, ROLES } from './lib/auth';
 
 /** Path prefixes and who may open them. Anything not listed is public. */
 const protectedAreas: { prefix: string; allow: (role: string | null | undefined) => boolean }[] = [
@@ -21,7 +21,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // Auth API handles its own sessions; static/public files need no lookup.
   if (path.startsWith('/api/auth/')) return next();
 
-  const result = await auth.api.getSession({ headers: context.request.headers });
+  // If auth is misconfigured (e.g. missing secret), treat everyone as signed
+  // out so public pages still load; protected pages then fail at /login.
+  let result: Awaited<ReturnType<ReturnType<typeof getAuth>['api']['getSession']>> = null;
+  try {
+    result = await getAuth().api.getSession({ headers: context.request.headers });
+  } catch (err) {
+    console.error('Session lookup failed', err);
+  }
   context.locals.user = result?.user ?? null;
   context.locals.session = result?.session ?? null;
 

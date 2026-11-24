@@ -7,7 +7,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import Logo from '../components/Logo.astro';
 import Button from '../components/ui/Button.astro';
 import { site } from '../config/site';
-import { auth, ROLES } from '../lib/auth';
+import { getAuth, ROLES } from '../lib/auth';
 import { authErrorMessage, field, redirectWithCookies } from '../lib/auth-helpers';
 import { getDb, schema } from '../db';
 
@@ -40,7 +40,7 @@ if (Astro.request.method === 'POST') {
     try {
       // Public sign-up is off and the admin API needs a signed-in admin, so the
       // very first account is created through Better Auth's internal adapter.
-      const ctx = await auth.$context;
+      const ctx = await getAuth().$context;
       const admin = await ctx.internalAdapter.createUser({
         name: values.name,
         email: values.email.toLowerCase(),
@@ -53,7 +53,7 @@ if (Astro.request.method === 'POST') {
         accountId: admin.id,
         password: await ctx.password.hash(password),
       });
-      const { headers } = await auth.api.signInEmail({
+      const { headers } = await getAuth().api.signInEmail({
         body: { email: values.email, password, rememberMe: true },
         headers: Astro.request.headers,
         returnHeaders: true,

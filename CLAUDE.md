@@ -29,7 +29,7 @@ src/
   pages/              # Routes. .astro = pages, .ts = API endpoints (e.g. health.ts)
   db/schema.ts        # Drizzle table definitions (single source of truth for the schema)
   db/index.ts         # getDb(): Drizzle client bound to env.DB
-  lib/auth.ts         # Better Auth instance, ROLES (admin, client), homeFor(user)
+  lib/auth.ts         # getAuth() (Better Auth instance), ROLES (admin, client), homeFor(user)
   lib/auth-helpers.ts # form helpers: error messages, safe redirects, cookies, temp passwords
   lib/nav.ts          # signed-in navigation for the client (/app) and admin (/admin) areas
   middleware.ts       # loads the session into Astro.locals and guards /admin and /app
@@ -63,7 +63,7 @@ drizzle.config.ts     # drizzle-kit config
   `/app/*` is any signed-in user. Public sign-up is disabled; admins create
   clients at `/admin/clients`. The first admin is created at `/setup`, which
   only works while the `user` table is empty. Forms post back to their own
-  page and call `auth.api.*` server-side (no client JS needed). Better Auth
+  page and call `getAuth().api.*` server-side (no client JS needed). Better Auth
   table columns are in `src/db/schema.ts`; keep property names matching
   Better Auth's field names when changing them.
 - After changing `wrangler.jsonc`, run `npm run cf-typegen` to refresh
