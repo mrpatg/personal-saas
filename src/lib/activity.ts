@@ -7,6 +7,7 @@
  */
 import { and, desc, eq, lt, or, type SQL } from 'drizzle-orm';
 import { getDb, schema } from '../db';
+import { site } from '../config/site';
 
 export type ActivityRow = typeof schema.activityLog.$inferSelect;
 export type SubjectType = 'invoice' | 'project' | 'task' | 'client' | 'user';
@@ -125,4 +126,11 @@ export function subjectHref(row: Pick<ActivityRow, 'subjectType' | 'subjectId'>)
     default:
       return null;
   }
+}
+
+const whenFmt = new Intl.DateTimeFormat(site.locale, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: site.timeZone, timeZoneName: 'short' });
+
+/** A timestamp in the site's time zone, e.g. "Nov 25, 2026, 2:04 PM EST". */
+export function formatWhen(date: Date): string {
+  return whenFmt.format(date);
 }
