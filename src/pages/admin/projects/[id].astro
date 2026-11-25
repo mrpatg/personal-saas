@@ -42,6 +42,7 @@ import {
 } from '../../../lib/work';
 import { getDb, schema } from '../../../db';
 import { displayStatus, invoiceName, invoiceNumber, invoiceStatus, listInvoices } from '../../../lib/invoices';
+import { logActivity } from '../../../lib/activity';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
@@ -64,6 +65,8 @@ if (Astro.request.method === 'POST') {
   const intent = field(form, 'intent');
   let anchor = '';
   let notice = '';
+  const log = (action: string, summary: string, task?: { id: string }) =>
+    logActivity(admin, { action, summary, subjectType: task ? 'task' : 'project', subjectId: task?.id ?? id, clientId: project.clientId }, Astro.request);
 
   if (intent === 'update-project') {
     const name = field(form, 'name');
@@ -86,6 +89,12 @@ if (Astro.request.method === 'POST') {
         })
         .where(eq(schema.project.id, id))
         .run();
+      await log(
+        status !== project.status ? 'project.status' : 'project.updated',
+        status !== project.status
+          ? `Changed project “${name}” from ${projectStatus[project.status].label} to ${projectStatus[status].label}`
+          : `Edited project “${name}”`,
+      );
       notice = 'project-saved';
     }
   } else if (intent === 'delete-project') {
@@ -95,6 +104,7 @@ if (Astro.request.method === 'POST') {
     else {
       // Tasks are removed with it (ON DELETE CASCADE).
       await db.delete(schema.project).where(eq(schema.project.id, id)).run();
+      await log('project.deleted', `Deleted project “${project.name}”`);
       return Astro.redirect('/admin/projects', 303);
     }
   } else if (intent === 'add-task') {
@@ -103,10 +113,11 @@ if (Astro.request.method === 'POST') {
     if (!title) error = 'The task needs a title.';
     else if (!isTaskStatus(status)) error = 'Choose a valid status.';
     else {
+      const taskId = crypto.randomUUID();
       await db
         .insert(schema.task)
         .values({
-          id: crypto.randomUUID(),
+          id: taskId,
           projectId: id,
           title,
           notes: field(form, 'notes') || null,
@@ -115,6 +126,7 @@ if (Astro.request.method === 'POST') {
           position: await nextTaskPosition(id),
         })
         .run();
+      await log('task.created', `Added task “${title}” to ${project.name}`, { id: taskId });
       anchor = 'add-task';
     }
   } else {
@@ -130,6 +142,7 @@ if (Astro.request.method === 'POST') {
       if (!isTaskStatus(status)) error = 'Choose a valid status.';
       else {
         await db.update(schema.task).set(statusChange(t, status)).where(eq(schema.task.id, t.id)).run();
+        if (status !== t.status) await log('task.status', `Moved “${t.title}” from ${taskStatus[t.status].label} to ${taskStatus[status].label}`, t);
         anchor = `task-${t.id}`;
       }
     } else if (intent === 'move-up' || intent === 'move-down') {

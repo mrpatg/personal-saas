@@ -1,0 +1,67 @@
+---
+/**
+ * Admin: the activity log. Everything done in the portal, newest first,
+ * filterable by kind and by client, 50 rows a page.
+ */
+import AppLayout from '../../layouts/AppLayout.astro';
+import ActivityList from '../../components/ActivityList.astro';
+import Button from '../../components/ui/Button.astro';
+import { adminNav } from '../../lib/nav';
+import { clientOptions } from '../../lib/projects';
+import { site } from '../../config/site';
+import { ACTIVITY_FILTERS, isActivityFilter, recentActivity } from '../../lib/activity';
+
+const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
+const params = Astro.url.searchParams;
+const kind = params.get('kind') ?? 'all';
+const filter = isActivityFilter(kind) ? kind : 'all';
+const clients = await clientOptions();
+const clientId = clients.some((c) => c.id === params.get('client')) ? params.get('client')! : '';
+const before = Number(params.get('before')) || undefined;
+const { rows, more } = await recentActivity({ filter, clientId: clientId || undefined, before });
+
+const link = (changes: Record<string, string | undefined>) => {
+  const q = new URLSearchParams();
+  const next = { kind: filter === 'all' ? undefined : filter, client: clientId || undefined, ...changes };
+  for (const [k, v] of Object.entries(next)) if (v) q.set(k, v);
+  const s = q.toString();
+  return `/admin/activity${s ? `?${s}` : ''}`;
+};
+const older = more && rows.length ? link({ before: String(rows.at(-1)!.createdAt.getTime()) }) : null;
+---
+
+<AppLayout title="Activity" nav={adminNav} active="/admin/activity" user={{ name: admin.name, company: 'Admin' }} signOut>
+  <p class="text-sm text-muted">Admin</p>
+  <h1 class="font-display text-4xl sm:text-5xl">Activity</h1>
+  <p class="mt-2 max-w-2xl text-muted">Who did what, and when. Times are {site.timeZone.replace('_', ' ')} time.</p>
+
+  <div class="mt-8 flex flex-wrap items-center justify-between gap-3">
+    <nav class="flex flex-wrap gap-2" aria-label="Filter activity">
+      {Object.entries(ACTIVITY_FILTERS).map(([key, f]) => (
+        <a
+          href={link({ kind: key === 'all' ? undefined : key })}
+          aria-current={filter === key ? 'page' : undefined}
+          class={`rounded-full px-4 py-1.5 text-sm transition ${filter === key ? 'bg-primary text-primary-foreground' : 'text-muted ring-1 ring-line hover:text-ink'}`}
+        >{f.label}</a>
+      ))}
+    </nav>
+    {clients.length > 0 && (
+      <form method="get" class="flex items-center gap-2">
+        {filter !== 'all' && <input type="hidden" name="kind" value={filter} />}
+        <label class="sr-only" for="client">Client</label>
+        <select id="client" name="client" class="block h-9 rounded-full bg-canvas px-3 text-sm ring-1 ring-line outline-none focus:ring-2 focus:ring-primary" onchange="this.form.submit()">
+          <option value="">All clients</option>
+          {clients.map((c) => <option value={c.id} selected={c.id === clientId}>{c.company ? `${c.name} (${c.company})` : c.name}</option>)}
+        </select>
+        <noscript><Button type="submit" size="sm" variant="secondary">Show</Button></noscript>
+      </form>
+    )}
+  </div>
+
+  <ActivityList rows={rows} links class="mt-6" />
+
+  <div class="mt-6 flex gap-3">
+    {before && <Button href={link({})} variant="ghost" size="sm">Newest</Button>}
+    {older && <Button href={older} variant="secondary" size="sm">Older</Button>}
+  </div>
+</AppLayout>

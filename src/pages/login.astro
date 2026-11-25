@@ -7,7 +7,9 @@
 import AuthShell from '../components/AuthShell.astro';
 import Button from '../components/ui/Button.astro';
 import { site } from '../config/site';
-import { getAuth, homeFor } from '../lib/auth';
+import { getAuth, homeFor, ROLES } from '../lib/auth';
+import { logActivity } from '../lib/activity';
+import { eq } from 'drizzle-orm';
 import { authErrorMessage, field, redirectWithCookies, safeRedirect } from '../lib/auth-helpers';
 import { getDb, schema } from '../db';
 
@@ -36,8 +38,22 @@ if (Astro.request.method === 'POST') {
       headers: Astro.request.headers,
       returnHeaders: true,
     });
+    const u = response.user as typeof response.user & { role?: string | null };
+    await logActivity(
+      { id: u.id, name: u.name, role: u.role },
+      { action: 'user.signed_in', summary: 'Signed in', subjectType: u.role === ROLES.client ? 'client' : 'user', subjectId: u.id, clientId: u.role === ROLES.client ? u.id : null },
+      Astro.request,
+    );
     return redirectWithCookies(safeRedirect(nextParam, homeFor(response.user)), headers);
   } catch (err) {
+    // Failed attempts on a real account are worth knowing about.
+    const known = email ? await getDb().select().from(schema.user).where(eq(schema.user.email, email.toLowerCase())).get() : undefined;
+    if (known)
+      await logActivity(
+        { system: 'Unknown visitor' },
+        { action: 'user.sign_in_failed', summary: `Failed sign-in attempt for ${known.email}`, subjectType: known.role === ROLES.client ? 'client' : 'user', subjectId: known.id, clientId: known.role === ROLES.client ? known.id : null },
+        Astro.request,
+      );
     error = authErrorMessage(err, 'Sign-in failed. Please try again.');
     Astro.response.status = 401;
   }

@@ -26,6 +26,7 @@ import {
   type InvoiceDisplayStatus,
 } from '../../../lib/invoices';
 import { getDb, schema } from '../../../db';
+import { logActivity } from '../../../lib/activity';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
 const clients = await clientOptions();
@@ -46,6 +47,13 @@ if (Astro.request.method === 'POST') {
   else if (!client || client.role !== 'client') error = 'Choose a project, or a client for a one-off invoice.';
   else {
     const { id, lineCount } = await createDraft({ client, projectId: project?.id ?? null, title: draft.title || null, workThrough });
+    await logActivity(admin, {
+      action: 'invoice.created',
+      subjectType: 'invoice',
+      subjectId: id,
+      clientId: client.id,
+      summary: `Created a draft invoice for ${client.name}${project ? ` (${project.name})` : ''}${lineCount ? ` with ${lineCount} line${lineCount === 1 ? '' : 's'} of unbilled work` : ''}`,
+    }, Astro.request);
     return Astro.redirect(`/admin/invoices/${id}?created=${lineCount}`, 303);
   }
   Astro.response.status = 400;

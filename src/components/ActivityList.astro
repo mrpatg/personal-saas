@@ -1,0 +1,58 @@
+---
+/**
+ * A list of activity log rows: when, who, and what. Times are shown in
+ * site.timeZone. With `links`, each row links to the record it concerns.
+ */
+import Card from './ui/Card.astro';
+import { site } from '../config/site';
+import { subjectHref, type ActivityRow } from '../lib/activity';
+
+interface Props {
+  rows: ActivityRow[];
+  links?: boolean;
+  class?: string;
+}
+const { rows, links = false, class: extra = '' } = Astro.props;
+
+const dayFmt = new Intl.DateTimeFormat(site.locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: site.timeZone });
+const timeFmt = new Intl.DateTimeFormat(site.locale, { hour: 'numeric', minute: '2-digit', timeZone: site.timeZone, timeZoneName: 'short' });
+const fullFmt = new Intl.DateTimeFormat(site.locale, { dateStyle: 'full', timeStyle: 'long', timeZone: site.timeZone });
+
+// Group consecutive rows by calendar day in the site's time zone.
+const days: { day: string; rows: ActivityRow[] }[] = [];
+for (const r of rows) {
+  const day = dayFmt.format(r.createdAt);
+  if (days.at(-1)?.day === day) days.at(-1)!.rows.push(r);
+  else days.push({ day, rows: [r] });
+}
+---
+
+{rows.length === 0 ? (
+  <Card class={extra}><p class="text-muted">Nothing recorded yet.</p></Card>
+) : (
+  <div class={`space-y-6 ${extra}`}>
+    {days.map(({ day, rows }) => (
+      <div>
+        <h3 class="px-1 text-xs font-medium uppercase tracking-wide text-muted">{day}</h3>
+        <Card padded={false} class="mt-2 overflow-hidden">
+          <ul class="divide-y divide-line">
+            {rows.map((r) => {
+              const href = links ? subjectHref(r) : null;
+              return (
+                <li class="flex gap-4 px-5 py-3 sm:px-7">
+                  <time datetime={r.createdAt.toISOString()} title={fullFmt.format(r.createdAt)} class="w-20 shrink-0 pt-0.5 text-xs tabular-nums text-muted">{timeFmt.format(r.createdAt)}</time>
+                  <div class="min-w-0 text-sm">
+                    <p class="break-words">{href ? <a href={href} class="hover:text-primary hover:underline">{r.summary}</a> : r.summary}</p>
+                    <p class="mt-0.5 text-xs text-muted">
+                      {r.actorName}{r.actorRole === 'client' ? ' · client' : ''}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      </div>
+    ))}
+  </div>
+)}

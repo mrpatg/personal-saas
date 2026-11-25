@@ -9,6 +9,7 @@ import Button from '../components/ui/Button.astro';
 import { site } from '../config/site';
 import { getAuth, ROLES } from '../lib/auth';
 import { authErrorMessage, field, redirectWithCookies } from '../lib/auth-helpers';
+import { logActivity } from '../lib/activity';
 import { getDb, schema } from '../db';
 
 const hasUsers = async () =>
@@ -58,6 +59,7 @@ if (Astro.request.method === 'POST') {
         headers: Astro.request.headers,
         returnHeaders: true,
       });
+      await logActivity({ id: admin.id, name: values.name, role: ROLES.admin }, { action: 'user.setup', summary: 'Created the admin account', subjectType: 'user', subjectId: admin.id }, Astro.request);
       return redirectWithCookies('/admin', headers);
     } catch (err) {
       error = authErrorMessage(err);
