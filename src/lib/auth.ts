@@ -17,7 +17,7 @@ export type Role = (typeof ROLES)[keyof typeof ROLES];
  * URL (including preview builds) and any custom domains listed in the
  * AUTH_HOSTS variable (comma-separated, e.g. "portal.example.com").
  */
-const allowedHosts = [
+export const allowedHosts = [
   'localhost:*',
   '127.0.0.1:*',
   '*.workers.dev',
