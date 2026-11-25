@@ -9,5 +9,5 @@ BETTER_AUTH_SECRET=replace-me-with-a-long-random-string
 # STRIPE_SECRET_KEY=
 # STRIPE_WEBHOOK_SECRET=
 
-# Resend (email feature)
-# RESEND_API_KEY=
+# Resend (email). Without it, emails are skipped and logged instead of sent.
+RESEND_API_KEY=
