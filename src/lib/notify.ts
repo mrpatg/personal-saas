@@ -83,3 +83,35 @@ export async function notifyTaskComment(taskId: string, authorId: string, body: 
     console.error('notifyTaskComment failed', err);
   }
 }
+
+/** After an online payment: a thank-you receipt to the client and a heads-up to the admin. */
+export async function notifyPaymentReceived(inv: Invoice, origin: string) {
+  try {
+    const client = await getDb().select().from(schema.user).where(eq(schema.user.id, inv.clientId)).get();
+    const amount = formatMoney(inv.totalCents);
+    if (client) {
+      const { html, text } = renderEmail({
+        preview: `We received ${amount} for ${invoiceNumber(inv)}`,
+        heading: 'Payment received, thank you',
+        paragraphs: [
+          `Hi ${firstName(client.name)}, we received your payment of ${amount} for invoice ${invoiceNumber(inv)}${inv.title ? ` (${inv.title})` : ''}.`,
+        ],
+        button: { label: 'View paid invoice', url: `${origin}/app/invoices/${inv.id}` },
+        footnote: 'You can print or save the paid invoice as a PDF from that page.',
+      });
+      await sendEmail({ to: client.email, subject: `Payment received for ${invoiceNumber(inv)}`, html, text });
+    }
+    if (site.email.adminNotify) {
+      const who = client ? `${client.name}${client.company ? ` (${client.company})` : ''}` : 'A client';
+      const { html, text } = renderEmail({
+        preview: `${who} paid ${amount}`,
+        heading: `${amount} received`,
+        paragraphs: [`${who} paid invoice ${invoiceNumber(inv)} online. It's been marked as paid.`],
+        button: { label: 'Open the invoice', url: `${origin}/admin/invoices/${inv.id}` },
+      });
+      await sendEmail({ to: site.email.adminNotify, subject: `Paid: ${invoiceNumber(inv)} (${amount})`, html, text });
+    }
+  } catch (err) {
+    console.error('notifyPaymentReceived failed', err);
+  }
+}

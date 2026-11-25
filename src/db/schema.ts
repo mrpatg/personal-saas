@@ -253,6 +253,11 @@ export const invoice = sqliteTable(
     sentAt: integer('sent_at', { mode: 'timestamp_ms' }),
     /** Date the payment arrived, YYYY-MM-DD. */
     paidDate: text('paid_date'),
+    /** How it was paid: "manual" (marked by the admin) or "stripe". */
+    paidVia: text('paid_via'),
+    /** Latest Stripe Checkout session for this invoice, and the payment that settled it. */
+    stripeCheckoutSessionId: text('stripe_checkout_session_id'),
+    stripePaymentIntentId: text('stripe_payment_intent_id'),
     voidedAt: integer('voided_at', { mode: 'timestamp_ms' }),
     ...timestamps,
   },

@@ -36,6 +36,13 @@
       "when": 1795551259006,
       "tag": "0004_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1795631471389,
+      "tag": "0005_stripe_payments",
+      "breakpoints": true
     }
   ]
 }
