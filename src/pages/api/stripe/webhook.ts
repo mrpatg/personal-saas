@@ -11,6 +11,7 @@ import { env } from 'cloudflare:workers';
 import { applyCheckoutSession, verifyStripeSignature, type CheckoutSession } from '../../../lib/stripe';
 import { inBackground } from '../../../lib/email';
 import { notifyPaymentReceived } from '../../../lib/notify';
+import { logActivity } from '../../../lib/activity';
 
 export const POST: APIRoute = async ({ request, locals, url }) => {
   const raw = await request.text();
@@ -28,6 +29,8 @@ export const POST: APIRoute = async ({ request, locals, url }) => {
     case 'checkout.session.async_payment_failed':
       // Bank payments can fail days later; the invoice simply stays due.
       console.warn(`Stripe async payment failed for session ${event.data.object.id}`);
+      if (event.data.object.metadata?.invoice_id)
+        await logActivity({ system: 'Stripe' }, { action: 'invoice.payment_failed', summary: 'A bank payment for this invoice failed; it is still due', subjectType: 'invoice', subjectId: event.data.object.metadata.invoice_id });
       break;
   }
   return new Response(JSON.stringify({ received: true }), { headers: { 'content-type': 'application/json' } });

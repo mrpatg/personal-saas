@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { site } from '../config/site';
 import { ROLES } from './auth';
-import { renderEmail, sendEmail } from './email';
+import { renderEmail, sendEmail, type EmailResult } from './email';
 import { formatDate } from './projects';
 import { formatMoney } from './work';
 import { invoiceNumber, type Invoice } from './invoices';
@@ -15,27 +15,37 @@ import { invoiceNumber, type Invoice } from './invoices';
 const firstName = (name: string) => name.split(' ')[0];
 const excerpt = (s: string, max = 1200) => (s.length > max ? `${s.slice(0, max)}…` : s);
 
-/** Tells the client a new invoice is ready. `origin` is the site's base URL. */
-export async function notifyInvoiceSent(inv: Invoice, origin: string) {
+/**
+ * Emails the client a link to their invoice (when it's sent, or again later).
+ * `origin` is the site's base URL. Blind-copies the admin when
+ * site.email.copyInvoicesToAdmin is on. Resolves to who it went to and how it went.
+ */
+export async function notifyInvoiceSent(inv: Invoice, origin: string, opts: { reminder?: boolean } = {}): Promise<EmailResult & { to?: string }> {
   try {
     const db = getDb();
     const sent = (await db.select().from(schema.invoice).where(eq(schema.invoice.id, inv.id)).get()) ?? inv;
     const client = await db.select().from(schema.user).where(eq(schema.user.id, sent.clientId)).get();
-    if (!client || client.banned) return;
+    if (!client) return { ok: false, error: 'The client account no longer exists.' };
+    if (client.banned) return { ok: false, error: 'The client account is disabled.' };
     const amount = formatMoney(sent.totalCents);
     const { html, text } = renderEmail({
       preview: `${invoiceNumber(sent)} for ${amount}, due ${formatDate(sent.dueDate)}`,
-      heading: `New invoice: ${amount}`,
+      heading: opts.reminder ? `Invoice ${invoiceNumber(sent)}: ${amount}` : `New invoice: ${amount}`,
       paragraphs: [
-        `Hi ${firstName(client.name)}, ${site.owner} has sent you invoice ${invoiceNumber(sent)}${sent.title ? ` (${sent.title})` : ''}.`,
+        opts.reminder
+          ? `Hi ${firstName(client.name)}, here's the link to invoice ${invoiceNumber(sent)}${sent.title ? ` (${sent.title})` : ''} from ${site.owner}.`
+          : `Hi ${firstName(client.name)}, ${site.owner} has sent you invoice ${invoiceNumber(sent)}${sent.title ? ` (${sent.title})` : ''}.`,
         `Amount: ${amount}\nDue: ${formatDate(sent.dueDate)}`,
       ],
       button: { label: 'View invoice', url: `${origin}/app/invoices/${sent.id}` },
       footnote: 'You can print or save it as a PDF from that page. Reply to this email with any questions.',
     });
-    await sendEmail({ to: client.email, subject: `Invoice ${invoiceNumber(sent)} from ${site.owner}: ${amount}`, html, text });
+    const bcc = site.email.copyInvoicesToAdmin && site.email.adminNotify && site.email.adminNotify !== client.email ? site.email.adminNotify : undefined;
+    const result = await sendEmail({ to: client.email, bcc, subject: `Invoice ${invoiceNumber(sent)} from ${site.owner}: ${amount}`, html, text });
+    return { ...result, to: client.email };
   } catch (err) {
     console.error('notifyInvoiceSent failed', err);
+    return { ok: false, error: err instanceof Error ? err.message : 'Email failed' };
   }
 }
 

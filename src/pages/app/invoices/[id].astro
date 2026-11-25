@@ -8,7 +8,9 @@ import InvoiceDocument from '../../../components/InvoiceDocument.astro';
 import { clientNav } from '../../../lib/nav';
 import { formatDate } from '../../../lib/projects';
 import { formatMoney } from '../../../lib/work';
-import { CLIENT_INVOICE_STATUSES, displayStatus, invoiceLines, invoiceName } from '../../../lib/invoices';
+import { CLIENT_INVOICE_STATUSES, displayStatus, invoiceLines, invoiceName, invoiceNumber } from '../../../lib/invoices';
+import { logActivity, loggedRecently } from '../../../lib/activity';
+import { ROLES } from '../../../lib/auth';
 import { getDb, schema } from '../../../db';
 import { site } from '../../../config/site';
 import { field } from '../../../lib/auth-helpers';
@@ -42,6 +44,7 @@ if (Astro.request.method === 'POST') {
     let url = '';
     try {
       url = await checkoutUrlFor(inv, user.email, Astro.url.origin);
+      await logActivity(user, { action: 'invoice.checkout', summary: `Opened the Stripe payment page for ${invoiceNumber(inv)}`, subjectType: 'invoice', subjectId: inv.id, clientId: inv.clientId }, Astro.request);
     } catch (err) {
       console.error('Checkout failed', err);
       error = err instanceof PaymentError ? err.message : 'We couldn’t start the payment. Please try again in a moment.';
@@ -74,6 +77,11 @@ if (checkout === 'done' && sessionId && stripeEnabled()) {
   }
 } else if (checkout === 'cancelled') {
   notice = 'Payment cancelled. Nothing was charged.';
+}
+
+// Record when the client opens the invoice (at most once an hour, and not the admin previewing it).
+if (Astro.request.method === 'GET' && user.role === ROLES.client && !(await loggedRecently(user.id, 'invoice.viewed', inv.id, 60))) {
+  await logActivity(user, { action: 'invoice.viewed', summary: `Viewed ${invoiceNumber(inv)}`, subjectType: 'invoice', subjectId: inv.id, clientId: inv.clientId }, Astro.request);
 }
 
 const lines = await invoiceLines(inv.id);

@@ -12,6 +12,8 @@ export interface EmailMessage {
   html: string;
   text: string;
   replyTo?: string;
+  /** Blind copies (e.g. the admin's own copy of an invoice email). */
+  bcc?: string | string[];
 }
 
 export type EmailResult = { ok: true; id?: string } | { ok: false; skipped?: boolean; error: string };
@@ -36,6 +38,7 @@ export async function sendEmail(msg: EmailMessage): Promise<EmailResult> {
         from: site.email.from,
         to: Array.isArray(msg.to) ? msg.to : [msg.to],
         reply_to: msg.replyTo ?? site.email.replyTo,
+        ...(msg.bcc ? { bcc: Array.isArray(msg.bcc) ? msg.bcc : [msg.bcc] } : {}),
         subject: msg.subject,
         html: msg.html,
         text: msg.text,

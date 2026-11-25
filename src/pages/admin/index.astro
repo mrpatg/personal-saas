@@ -9,6 +9,8 @@ import { ROLES } from '../../lib/auth';
 import { getDb, schema } from '../../db';
 import { formatMoney } from '../../lib/work';
 import { outstanding } from '../../lib/invoices';
+import { recentActivity } from '../../lib/activity';
+import ActivityList from '../../components/ActivityList.astro';
 
 const user = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
@@ -20,6 +22,7 @@ const [clients, disabled, activeProjects] = await Promise.all([
   db.select({ n: sql<number>`count(*)` }).from(schema.project).where(eq(schema.project.status, 'active')).get().then((r) => r?.n ?? 0),
 ]);
 const owed = await outstanding();
+const { rows: latest } = await recentActivity({ limit: 6 });
 ---
 
 <AppLayout title="Admin" nav={adminNav} active="/admin" user={{ name: user.name, company: 'Admin' }} signOut>
@@ -53,4 +56,12 @@ const owed = await outstanding();
     <Button href="/admin/invoices" variant="secondary">Invoices</Button>
     <Button href="/admin/clients" variant="secondary">Manage clients</Button>
   </div>
+
+  <section class="mt-12 max-w-3xl">
+    <div class="flex items-end justify-between gap-4">
+      <h2 class="font-display text-3xl">Recent activity</h2>
+      <a href="/admin/activity" class="text-sm text-primary hover:underline">See all</a>
+    </div>
+    <ActivityList rows={latest} links class="mt-4" />
+  </section>
 </AppLayout>

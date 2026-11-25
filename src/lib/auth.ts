@@ -5,6 +5,7 @@ import { admin } from 'better-auth/plugins';
 import { adminAc, userAc } from 'better-auth/plugins/admin/access';
 import { getDb, schema } from '../db';
 import { site } from '../config/site';
+import { logActivity } from './activity';
 import { renderEmail, sendEmail, type EmailResult } from './email';
 
 /** The two roles in the app. Admins manage everything; clients see their own work. */
@@ -59,6 +60,14 @@ function createAuth(secret: string) {
         const link = `${parsed.origin}/reset-password?token=${encodeURIComponent(token)}${invite ? '&invite=1' : ''}`;
         const result = await sendEmail({ to: user.email, ...passwordEmail(user.name, link, invite) });
         lastPasswordEmail.set(user.email.toLowerCase(), result);
+      },
+      onPasswordReset: async ({ user }, request) => {
+        const role = (user as { role?: string | null }).role ?? null;
+        await logActivity(
+          { id: user.id, name: user.name, role },
+          { action: 'user.password_reset', summary: 'Set a new password from an emailed link', subjectType: role === ROLES.client ? 'client' : 'user', subjectId: user.id, clientId: role === ROLES.client ? user.id : null },
+          request,
+        );
       },
     },
     user: {

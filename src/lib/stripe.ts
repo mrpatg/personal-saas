@@ -12,6 +12,8 @@ import { and, eq } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { site } from '../config/site';
 import { invoiceName, invoiceNumber, todayISO, type Invoice } from './invoices';
+import { logActivity } from './activity';
+import { formatMoney } from './work';
 
 const API = 'https://api.stripe.com/v1';
 
@@ -124,6 +126,8 @@ export async function expireCheckout(inv: Invoice) {
   }
 }
 
+const STRIPE = { system: 'Stripe' };
+
 export type ApplyResult = { invoice: Invoice; newlyPaid: boolean } | null;
 
 /**
@@ -159,8 +163,22 @@ export async function applyCheckoutSession(session: CheckoutSession): Promise<Ap
     // Paid while void (or otherwise not payable): keep the payment reference for the admin.
     console.error(`Stripe payment for invoice ${inv.id} in status ${inv.status}`);
     await db.update(schema.invoice).set({ stripePaymentIntentId: session.payment_intent }).where(eq(schema.invoice.id, inv.id)).run();
+    await logActivity(STRIPE, {
+      action: 'invoice.paid_while_void',
+      summary: `Stripe payment of ${formatMoney(session.amount_total ?? 0)} arrived for ${invoiceNumber(inv)}, which is ${inv.status}. Review or refund it in Stripe.`,
+      subjectType: 'invoice',
+      subjectId: inv.id,
+      clientId: inv.clientId,
+    });
     return { invoice: inv, newlyPaid: false };
   }
+  await logActivity(STRIPE, {
+    action: 'invoice.paid',
+    summary: `${invoiceNumber(inv)} paid online (${formatMoney(session.amount_total ?? inv.totalCents)})`,
+    subjectType: 'invoice',
+    subjectId: inv.id,
+    clientId: inv.clientId,
+  });
   return { invoice: result[0], newlyPaid: true };
 }
 

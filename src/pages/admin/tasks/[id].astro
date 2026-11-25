@@ -29,6 +29,7 @@ import { getDb, schema } from '../../../db';
 import { invoiceNumber, invoiceRefs } from '../../../lib/invoices';
 import { inBackground } from '../../../lib/email';
 import { notifyTaskComment } from '../../../lib/notify';
+import { logActivity } from '../../../lib/activity';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
@@ -56,6 +57,8 @@ if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const intent = field(form, 'intent');
   let anchor = '';
+  const log = (action: string, summary: string) =>
+    logActivity(admin, { action, summary, subjectType: 'task', subjectId: id, clientId: project.clientId }, Astro.request);
 
   if (intent === 'update-task') {
     const title = field(form, 'title');
@@ -68,6 +71,10 @@ if (Astro.request.method === 'POST') {
         .set({ ...statusChange(task, status), title, notes: field(form, 'notes') || null })
         .where(eq(schema.task.id, id))
         .run();
+      await log(
+        status !== task.status ? 'task.status' : 'task.updated',
+        status !== task.status ? `Moved “${title}” from ${taskStatus[task.status].label} to ${taskStatus[status].label}` : `Edited task “${title}”`,
+      );
       anchor = 'details';
     }
   } else if (intent === 'delete-task') {
@@ -75,12 +82,16 @@ if (Astro.request.method === 'POST') {
     if (entries.length) error = 'This task has time or costs logged. Delete those entries first, or leave the task in place.';
     else {
       await db.delete(schema.task).where(eq(schema.task.id, id)).run();
+      await log('task.deleted', `Deleted task “${task.title}” from ${project.name}`);
       return Astro.redirect(`${projectHref}#tasks`, 303);
     }
   } else if (intent === 'comment') {
     commentDraft = field(form, 'body');
     error = (await addComment(id, admin.id, commentDraft)) ?? '';
-    if (!error) await inBackground(Astro.locals, notifyTaskComment(id, admin.id, commentDraft, Astro.url.origin));
+    if (!error) {
+      await log('task.comment', `Commented on “${task.title}”`);
+      await inBackground(Astro.locals, notifyTaskComment(id, admin.id, commentDraft, Astro.url.origin));
+    }
     anchor = 'comments';
   } else if (intent === 'add-time') {
     timeDraft = {
@@ -112,6 +123,7 @@ if (Astro.request.method === 'POST') {
           createdById: admin.id,
         })
         .run();
+      await log('work.time_added', `Logged ${formatHours(minutes)} on “${task.title}” (${formatMoney(timeAmount(minutes, rateCents))}${timeDraft.billable ? '' : ', not billable'})`);
       anchor = 'work';
     }
   } else if (intent === 'add-cost') {
@@ -140,6 +152,7 @@ if (Astro.request.method === 'POST') {
           createdById: admin.id,
         })
         .run();
+      await log('work.cost_added', `Added a ${formatMoney(amountCents)} cost to “${task.title}”: ${costDraft.description}${costDraft.billable ? '' : ' (not billable)'}`);
       anchor = 'work';
     }
   } else if (intent === 'delete-entry') {
@@ -148,6 +161,10 @@ if (Astro.request.method === 'POST') {
     else if (entry.invoiceId) error = 'That entry is on an invoice. To change it, remove its line from the draft invoice (or void a sent one) first.';
     else {
       await db.delete(schema.workEntry).where(eq(schema.workEntry.id, entry.id)).run();
+      await log(
+        'work.deleted',
+        `Deleted ${entry.kind === 'time' ? `${formatHours(entry.minutes ?? 0)} of time` : `a ${formatMoney(entry.amountCents)} cost`} from “${task.title}”`,
+      );
       anchor = 'work';
     }
   } else error = 'Unknown action.';

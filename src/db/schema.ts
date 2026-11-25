@@ -293,3 +293,39 @@ export const invoiceLine = sqliteTable(
   },
   (t) => [index('invoice_line_invoice_id_idx').on(t.invoiceId, t.position)],
 );
+
+/**
+ * Activity log: one row per action someone took in the portal (or that Stripe
+ * took, with no actor), newest read first. `actorName` and `summary` are
+ * captured when the row is written so the history still reads correctly after
+ * a record is renamed or deleted. Write rows with logActivity() in
+ * src/lib/activity.ts.
+ */
+export const activityLog = sqliteTable(
+  'activity_log',
+  {
+    id: text('id').primaryKey(),
+    /** Who did it; empty for automatic actions (e.g. a Stripe webhook). */
+    actorId: text('actor_id').references(() => user.id, { onDelete: 'set null' }),
+    actorName: text('actor_name').notNull(),
+    actorRole: text('actor_role'),
+    /** Dotted action name, e.g. "invoice.sent". */
+    action: text('action').notNull(),
+    /** What it was done to: "invoice", "project", "task", "client", "user". */
+    subjectType: text('subject_type'),
+    subjectId: text('subject_id'),
+    /** Client the action concerns, for filtering. */
+    clientId: text('client_id'),
+    /** Human-readable sentence, e.g. "Sent INV-1004 ($1,250.00)". */
+    summary: text('summary').notNull(),
+    ip: text('ip'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => [
+    index('activity_log_created_at_idx').on(t.createdAt),
+    index('activity_log_subject_idx').on(t.subjectType, t.subjectId, t.createdAt),
+    index('activity_log_actor_id_idx').on(t.actorId, t.createdAt),
+  ],
+);
