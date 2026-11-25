@@ -1,0 +1,41 @@
+---
+/**
+ * A person's photo (circle) or a project's image (rounded square), with
+ * initials as the fallback when there's no image.
+ */
+interface Props {
+  name: string;
+  src?: string | null;
+  /** xs 24px, sm 36px, md 48px, lg 80px, xl 96px */
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
+  shape?: 'circle' | 'square';
+  /** Fallback colors: "strong" (primary) for the admin, "soft" otherwise. */
+  tone?: 'soft' | 'strong';
+  class?: string;
+}
+const { name, src, size = 'sm', shape = 'circle', tone = 'soft', class: extra = '' } = Astro.props;
+
+const sizes = {
+  xs: 'h-6 w-6 text-[10px]',
+  sm: 'h-9 w-9 text-sm',
+  md: 'h-12 w-12 text-base',
+  lg: 'h-20 w-20 text-2xl',
+  xl: 'h-24 w-24 text-3xl',
+};
+const radius = shape === 'circle' ? 'rounded-full' : size === 'xs' || size === 'sm' ? 'rounded-xl' : 'rounded-2xl';
+const initials = name
+  .split(/\s+/)
+  .filter(Boolean)
+  .map((w) => w[0])
+  .join('')
+  .slice(0, 2)
+  .toUpperCase();
+const colors = tone === 'strong' ? 'bg-primary text-primary-foreground' : 'bg-primary-soft text-primary';
+const base = `${sizes[size]} ${radius} shrink-0 ${extra}`;
+---
+
+{src ? (
+  <img src={src} alt="" width="96" height="96" loading="lazy" decoding="async" class={`${base} bg-primary-soft object-cover ring-1 ring-line`} />
+) : (
+  <span class={`${base} ${colors} inline-flex items-center justify-center font-semibold ${shape === 'square' ? 'font-display font-normal' : ''}`} aria-hidden="true">{initials}</span>
+)}

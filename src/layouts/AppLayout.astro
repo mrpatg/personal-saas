@@ -4,6 +4,7 @@
  * Desktop: top bar + left sidebar. Mobile: top bar + bottom tab bar.
  */
 import BaseLayout from './BaseLayout.astro';
+import Avatar from '../components/ui/Avatar.astro';
 import Logo from '../components/Logo.astro';
 
 export interface AppNavItem {
@@ -18,7 +19,8 @@ interface Props {
   nav: AppNavItem[];
   /** href of the active nav item. */
   active?: string;
-  user: { name: string; company?: string };
+  /** The signed-in user's photo defaults to Astro.locals.user.image. */
+  user: { name: string; company?: string; image?: string | null };
   /** Small banner text above the page, e.g. for design previews. */
   notice?: string;
   /** Show a "Sign out" button in the header (off for design previews). */
@@ -26,12 +28,7 @@ interface Props {
 }
 
 const { title, nav, active, user, notice, signOut = false } = Astro.props;
-const initials = user.name
-  .split(' ')
-  .map((w) => w[0])
-  .join('')
-  .slice(0, 2)
-  .toUpperCase();
+const avatar = user.image !== undefined ? user.image : (Astro.locals.user?.image ?? null);
 ---
 
 <BaseLayout title={title} noindex>
@@ -46,9 +43,7 @@ const initials = user.name
           <p class="text-sm font-medium leading-tight">{user.name}</p>
           {user.company && <p class="text-xs text-muted">{user.company}</p>}
         </div>
-        <span class="flex h-9 w-9 items-center justify-center rounded-full bg-primary-soft text-sm font-semibold text-primary" aria-hidden="true">
-          {initials}
-        </span>
+        <Avatar name={user.name} src={avatar} size="sm" />
         {signOut && (
           <form method="post" action="/logout">
             <button type="submit" class="rounded-full px-3 py-1.5 text-sm text-muted transition hover:bg-primary-soft hover:text-ink">

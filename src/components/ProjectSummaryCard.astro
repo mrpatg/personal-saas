@@ -3,6 +3,7 @@
 import Card from './ui/Card.astro';
 import StatusBadge from './ui/StatusBadge.astro';
 import ProgressBar from './ui/ProgressBar.astro';
+import Avatar from './ui/Avatar.astro';
 import { formatDate, projectStatus, type Project, type TaskCounts } from '../lib/projects';
 
 interface Props {
@@ -16,9 +17,12 @@ const caption = `${p.counts.done} of ${p.counts.total} tasks done${p.dueDate ? `
 <a href={href} class="block h-full rounded-3xl transition hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-primary">
   <Card class="h-full">
     <div class="flex items-start justify-between gap-4">
-      <div class="min-w-0">
-        <h3 class="text-lg font-semibold tracking-tight break-words">{p.name}</h3>
-        {p.description && <p class="mt-1 line-clamp-2 text-sm leading-relaxed text-muted">{p.description}</p>}
+      <div class="flex min-w-0 items-start gap-3">
+        <Avatar name={p.name} src={p.image} size="md" shape="square" />
+        <div class="min-w-0">
+          <h3 class="text-lg font-semibold tracking-tight break-words">{p.name}</h3>
+          {p.description && <p class="mt-1 line-clamp-2 text-sm leading-relaxed text-muted">{p.description}</p>}
+        </div>
       </div>
       {p.status === 'active' ? (
         <span class="shrink-0 text-sm font-medium text-primary">{p.counts.percent}%</span>

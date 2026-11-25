@@ -1,0 +1,90 @@
+---
+/**
+ * Image picker with a live preview. The browser crops the chosen image to a
+ * centered square and shrinks it to 256px before upload, so files stay small
+ * (src/lib/media.ts checks type and size). Forms using it need
+ * enctype="multipart/form-data".
+ */
+import Avatar from './ui/Avatar.astro';
+
+interface Props {
+  /** Field name; the remove checkbox is named remove_<name>. */
+  name?: string;
+  label: string;
+  /** Current image URL, if any. */
+  src?: string | null;
+  /** Used for the initials fallback. */
+  fallbackName: string;
+  shape?: 'circle' | 'square';
+}
+const { name = 'image', label, src, fallbackName, shape = 'circle' } = Astro.props;
+const id = `img-${name}-${Math.random().toString(36).slice(2, 8)}`;
+const radius = shape === 'circle' ? 'rounded-full' : 'rounded-2xl';
+---
+
+<div class="flex items-center gap-4" data-image-input>
+  <div class="relative h-20 w-20 shrink-0">
+    <Avatar name={fallbackName} src={src} size="lg" shape={shape} />
+    <img data-preview alt="" class={`absolute inset-0 hidden h-20 w-20 ${radius} object-cover ring-1 ring-line`} />
+  </div>
+  <div class="min-w-0 text-sm">
+    <label for={id} class="inline-flex h-9 cursor-pointer items-center rounded-full px-4 font-medium ring-1 ring-line transition hover:ring-primary/40">
+      {src ? 'Change' : 'Upload'} {label.toLowerCase()}
+    </label>
+    <input id={id} type="file" name={name} accept="image/jpeg,image/png,image/webp,image/heic,image/heif" class="sr-only" />
+    <p class="mt-1.5 text-xs text-muted" data-hint>Square images look best. JPG, PNG or WebP.</p>
+    {src && (
+      <label class="mt-1.5 flex items-center gap-2 text-xs text-muted">
+        <input type="checkbox" name={`remove_${name}`} class="h-3.5 w-3.5 accent-primary" /> Remove {label.toLowerCase()}
+      </label>
+    )}
+  </div>
+</div>
+
+<script>
+  const SIZE = 256;
+
+  async function shrink(file: File): Promise<File | null> {
+    const bitmap = await createImageBitmap(file).catch(() => null);
+    if (!bitmap) return null;
+    const side = Math.min(bitmap.width, bitmap.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = Math.min(SIZE, side);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
+    const toBlob = (type: string) => new Promise<Blob | null>((r) => canvas.toBlob(r, type, 0.85));
+    // Safari can't encode WebP and quietly returns PNG; fall back to JPEG then.
+    let blob = await toBlob('image/webp');
+    if (!blob || blob.type !== 'image/webp') blob = await toBlob('image/jpeg');
+    if (!blob) return null;
+    const ext = blob.type === 'image/webp' ? 'webp' : 'jpg';
+    return new File([blob], `image.${ext}`, { type: blob.type });
+  }
+
+  for (const root of document.querySelectorAll<HTMLElement>('[data-image-input]')) {
+    const input = root.querySelector<HTMLInputElement>('input[type=file]')!;
+    const preview = root.querySelector<HTMLImageElement>('[data-preview]')!;
+    const hint = root.querySelector<HTMLElement>('[data-hint]')!;
+    input.addEventListener('change', async () => {
+      const original = input.files?.[0];
+      if (!original || original.name === 'image.webp' || original.name === 'image.jpg') return;
+      hint.textContent = 'Preparing image…';
+      const small = await shrink(original);
+      if (!small) {
+        hint.textContent = 'That file couldn’t be read as an image. Try a JPG or PNG.';
+        input.value = '';
+        return;
+      }
+      const dt = new DataTransfer();
+      dt.items.add(small);
+      input.files = dt.files;
+      preview.src = URL.createObjectURL(small);
+      preview.classList.remove('hidden');
+      hint.textContent = 'New image ready. Save to keep it.';
+      const remove = root.querySelector<HTMLInputElement>('input[type=checkbox]');
+      if (remove) remove.checked = false;
+    });
+  }
+</script>

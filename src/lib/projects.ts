@@ -97,7 +97,7 @@ export async function clientProjects(clientId: string) {
 /** Every project with its client's name, optionally for one client, with task counts. */
 export async function allProjects(clientId?: string) {
   const projects = await getDb()
-    .select({ project: schema.project, clientName: schema.user.name, clientCompany: schema.user.company })
+    .select({ project: schema.project, clientName: schema.user.name, clientCompany: schema.user.company, clientImage: schema.user.image })
     .from(schema.project)
     .innerJoin(schema.user, eq(schema.project.clientId, schema.user.id))
     .where(clientId ? eq(schema.project.clientId, clientId) : undefined)
@@ -108,6 +108,7 @@ export async function allProjects(clientId?: string) {
     ...r.project,
     clientName: r.clientName,
     clientCompany: r.clientCompany,
+    clientImage: r.clientImage,
     counts: counts.get(r.project.id) ?? countsFrom(0, 0),
   }));
 }

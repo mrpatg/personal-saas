@@ -127,6 +127,8 @@ export const project = sqliteTable(
     dueDate: text('due_date'),
     /** Default hourly rate in cents for new time entries (optional). */
     hourlyRateCents: integer('hourly_rate_cents'),
+    /** Project image URL (/media/<id>), shown as a rounded square. */
+    image: text('image'),
     ...timestamps,
   },
   (t) => [index('project_client_id_idx').on(t.clientId)],
@@ -329,3 +331,24 @@ export const activityLog = sqliteTable(
     index('activity_log_actor_id_idx').on(t.actorId, t.createdAt),
   ],
 );
+
+/**
+ * Small uploaded images (client photos, project images), stored in D1 as
+ * base64 and served by /media/[id] to signed-in users. Images are resized in
+ * the browser before upload (see src/components/ImageInput.astro), so each is
+ * a few KB. A new upload gets a new id, so URLs can be cached forever.
+ */
+export const media = sqliteTable('media', {
+  id: text('id').primaryKey(),
+  contentType: text('content_type').notNull(),
+  /** Base64-encoded bytes. */
+  data: text('data').notNull(),
+  bytes: integer('bytes').notNull(),
+  /** What it belongs to, e.g. "user" or "project", for clean-up. */
+  ownerType: text('owner_type').notNull(),
+  ownerId: text('owner_id').notNull(),
+  createdById: text('created_by_id').references(() => user.id, { onDelete: 'set null' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});

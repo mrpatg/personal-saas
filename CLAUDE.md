@@ -38,6 +38,7 @@ src/
   lib/email.ts        # sendEmail() through Resend, renderEmail() branded template, inBackground()
   lib/notify.ts       # notification emails: invoice sent, task comments, payment received
   lib/activity.ts     # activity log: logActivity() (never throws), recentActivity(), subjectActivity()
+  lib/media.ts        # uploaded images (client photos, project images) stored in D1, served at /media/[id]
   lib/stripe.ts       # Stripe Checkout for invoices (REST via fetch), webhook signature check, applyCheckoutSession()
   middleware.ts       # loads the session into Astro.locals and guards /admin and /app
   styles/global.css   # Tailwind entry + brand color tokens
@@ -132,6 +133,16 @@ drizzle.config.ts     # drizzle-kit config
   History section of each invoice. Times show in `site.timeZone`. Client
   invoice views are logged at most once an hour per invoice. New features
   should log their actions too.
+- **Images** (`media` table, `src/lib/media.ts`). Client photos
+  (`user.image`, shown round) and project images (`project.image`, rounded
+  square) are uploaded with `src/components/ImageInput.astro`, which crops and
+  shrinks them to 256px in the browser; forms need
+  `enctype="multipart/form-data"`. They're stored in D1 and served by
+  `/media/[id]` to signed-in users only. Show them with
+  `src/components/ui/Avatar.astro`, which falls back to initials. Admins edit
+  a client's name, company, email and photo from the Edit link on
+  `/admin/clients` (`?edit=<id>` opens the pop-up); every change is logged
+  with the before and after values.
 - After changing `wrangler.jsonc`, run `npm run cf-typegen` to refresh
   `worker-configuration.d.ts`.
 - Small commits with clear messages, one working step at a time.
