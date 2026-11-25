@@ -4,6 +4,8 @@ import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { admin } from 'better-auth/plugins';
 import { adminAc, userAc } from 'better-auth/plugins/admin/access';
 import { getDb, schema } from '../db';
+import { site } from '../config/site';
+import { renderEmail, sendEmail, type EmailResult } from './email';
 
 /** The two roles in the app. Admins manage everything; clients see their own work. */
 export const ROLES = { admin: 'admin', client: 'client' } as const;
@@ -46,6 +48,18 @@ function createAuth(secret: string) {
       enabled: true,
       disableSignUp: true,
       minPasswordLength: 10,
+      // Reset links double as invite links for new clients, so give them time.
+      resetPasswordTokenExpiresIn: PASSWORD_LINK_HOURS * 60 * 60,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, url, token }) => {
+        // Better Auth's url points at its own API route; we link to our page
+        // instead. An invite is a reset requested with redirectTo containing "invite=1".
+        const parsed = new URL(url);
+        const invite = (parsed.searchParams.get('callbackURL') ?? '').includes('invite=1');
+        const link = `${parsed.origin}/reset-password?token=${encodeURIComponent(token)}${invite ? '&invite=1' : ''}`;
+        const result = await sendEmail({ to: user.email, ...passwordEmail(user.name, link, invite) });
+        lastPasswordEmail.set(user.email.toLowerCase(), result);
+      },
     },
     user: {
       additionalFields: {
@@ -65,6 +79,55 @@ function createAuth(secret: string) {
       }),
     ],
   });
+}
+
+/**
+ * Result of the most recent password/invite email per address, so admin
+ * pages can tell whether an invite actually went out (Better Auth's
+ * requestPasswordReset deliberately reports success either way).
+ */
+const lastPasswordEmail = new Map<string, EmailResult>();
+
+/**
+ * Emails a set-password link to an existing user: an invite (welcome wording)
+ * or a normal reset. Returns whether the email was sent.
+ */
+export async function sendPasswordLink(email: string, kind: 'invite' | 'reset', headers: Headers): Promise<EmailResult> {
+  const key = email.toLowerCase();
+  lastPasswordEmail.delete(key);
+  await getAuth().api.requestPasswordReset({
+    body: { email, redirectTo: kind === 'invite' ? '/reset-password?invite=1' : '/reset-password' },
+    headers,
+  });
+  const result = lastPasswordEmail.get(key) ?? { ok: false, error: 'No account with that email.' };
+  lastPasswordEmail.delete(key);
+  return result;
+}
+
+/** How long invite and reset-password links stay valid. */
+export const PASSWORD_LINK_HOURS = 72;
+
+function passwordEmail(name: string, link: string, invite: boolean) {
+  const first = name.split(' ')[0];
+  const { html, text } = invite
+    ? renderEmail({
+        preview: `Your ${site.name} account is ready`,
+        heading: `Welcome, ${first}`,
+        paragraphs: [
+          `${site.owner} has set up an account for you on ${site.name}, where you can follow your projects, reply on tasks and view invoices.`,
+          'Choose a password to get started.',
+        ],
+        button: { label: 'Set your password', url: link },
+        footnote: `This link works once and expires in ${PASSWORD_LINK_HOURS / 24} days. If it has expired, use "Forgot password" on the sign-in page.`,
+      })
+    : renderEmail({
+        preview: 'Reset your password',
+        heading: 'Reset your password',
+        paragraphs: [`Hi ${first}, we received a request to reset your ${site.name} password.`],
+        button: { label: 'Choose a new password', url: link },
+        footnote: `This link works once and expires in ${PASSWORD_LINK_HOURS / 24} days. If you didn't ask for this, you can ignore this email.`,
+      });
+  return { subject: invite ? `Your ${site.name} account is ready` : `Reset your ${site.name} password`, html, text };
 }
 
 type Auth = ReturnType<typeof createAuth>;
