@@ -38,7 +38,7 @@ import { getDb, schema } from '../../../db';
 import { emailEnabled, inBackground } from '../../../lib/email';
 import { notifyInvoiceSent } from '../../../lib/notify';
 import { expireCheckout, stripeEnabled, stripePaymentUrl } from '../../../lib/stripe';
-import { logActivity, subjectActivity } from '../../../lib/activity';
+import { formatWhen, logActivity, subjectActivity } from '../../../lib/activity';
 import ActivityList from '../../../components/ActivityList.astro';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
@@ -213,6 +213,10 @@ const [lines, client, project, history] = await Promise.all([
   subjectActivity('invoice', id),
 ]);
 const clientUrl = `${Astro.url.origin}/app/invoices/${id}`;
+// Newest email attempt for this invoice (history is newest first).
+const lastEmail = history.find((r) => r.action === 'invoice.emailed');
+const lastAttempt = history.find((r) => r.action === 'invoice.emailed' || r.action === 'invoice.email_failed');
+const lastFailed = lastAttempt?.action === 'invoice.email_failed' ? lastAttempt : undefined;
 const newerWork = current.status === 'draft' && current.projectId ? await unbilledEntries(current.projectId) : [];
 const newerCents = newerWork.reduce((s, r) => s + r.entry.amountCents, 0);
 
@@ -229,7 +233,7 @@ const notice =
       ? n === 'pulled-0' ? 'No newer unbilled work to add.' : `Added ${n.slice(7)} line(s) of newer work.`
       : ({
           saved: 'Invoice details saved.',
-          sent: 'Invoice sent. Your client can now see it in their portal. No email went out: use “Email the client a link” or copy the link to send it yourself.',
+          sent: 'Invoice sent. Your client can now see it in their portal. No email went out: use “Email invoice link” or copy the link to send it yourself.',
           'sent-emailed': 'Invoice sent. Your client can see it in their portal, and we’re emailing them a link to it.',
           paid: 'Marked as paid.',
           emailed: 'We’re emailing your client a link to this invoice. It’ll show in the history below once it’s gone.',
@@ -280,7 +284,9 @@ const small = 'h-9 rounded-xl bg-canvas px-3 text-sm ring-1 ring-line outline-no
               {emailEnabled() && (
                 <form method="post">
                   <input type="hidden" name="intent" value="email-link" />
-                  <Button type="submit" variant="secondary" size="sm" class="w-full">Email the client a link</Button>
+                  <Button type="submit" variant="secondary" size="sm" class="w-full">{lastEmail ? 'Resend invoice link' : 'Email invoice link'}</Button>
+                  {lastEmail && <p class="mt-1.5 text-xs text-muted">Last sent {formatWhen(lastEmail.createdAt)}</p>}
+                  {lastFailed && <p class="mt-1.5 text-xs text-rose-700">Last attempt failed {formatWhen(lastFailed.createdAt)}. See History below.</p>}
                 </form>
               )}
               <label class="block text-xs font-medium text-muted">
