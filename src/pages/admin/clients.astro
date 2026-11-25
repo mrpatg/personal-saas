@@ -1,7 +1,7 @@
 ---
 /**
- * Admin: client accounts. Add a client, reset a password, disable or
- * re-enable an account. Forms post back here and call Better Auth's admin
+ * Admin: client accounts. Add a client, edit their details and photo, reset
+ * a password, disable or re-enable an account. Forms post back here and call Better Auth's admin
  * API with the admin's own session, so its permission checks apply too.
  */
 import { asc, eq } from 'drizzle-orm';
@@ -16,6 +16,12 @@ import { authErrorMessage, field, generatePassword } from '../../lib/auth-helper
 import { getDb, schema } from '../../db';
 import { logActivity } from '../../lib/activity';
 import { inputClass } from '../../components/ui/forms';
+import Avatar from '../../components/ui/Avatar.astro';
+import ImageInput from '../../components/ImageInput.astro';
+import { applyImageChange, readImageField } from '../../lib/media';
+
+/** A validation problem in the edit form; shown inside the Edit pop-up. */
+class EditError extends Error {}
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
@@ -30,6 +36,9 @@ let credentials: { title: string; email: string; password: string } | null = nul
 let notice = '';
 let error = '';
 let draft = { name: '', company: '', email: '' };
+/** The client being edited when saving failed, with what was typed. */
+let editDraft: { id: string; name: string; company: string; email: string } | null = null;
+let editError = '';
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
@@ -72,7 +81,36 @@ if (Astro.request.method === 'POST') {
       const target = await db.select().from(schema.user).where(eq(schema.user.id, field(form, 'userId'))).get();
       if (!target || target.role !== ROLES.client) throw new Error('Client not found.');
 
-      if (intent === 'send-link') {
+      if (intent === 'update-client') {
+        editDraft = { id: target.id, name: field(form, 'name'), company: field(form, 'company'), email: field(form, 'email').toLowerCase() };
+        const { name, company, email } = editDraft;
+        const image = readImageField(form);
+        if (!name) throw new EditError('Enter their name.');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new EditError('Enter a valid email address.');
+        if (image.kind === 'error') throw new EditError(image.message);
+        if (email !== target.email) {
+          const taken = await db.select({ id: schema.user.id }).from(schema.user).where(eq(schema.user.email, email)).get();
+          if (taken) throw new EditError('Another account already uses that email.');
+        }
+        const quote = (v: string | null) => (v ? `“${v}”` : 'blank');
+        const changes: string[] = [];
+        if (name !== target.name) changes.push(`name ${quote(target.name)} → ${quote(name)}`);
+        if ((company || null) !== (target.company || null)) changes.push(`company ${quote(target.company)} → ${quote(company || null)}`);
+        if (email !== target.email) changes.push(`email ${target.email} → ${email}`);
+        const newImage = await applyImageChange(image, target.image, { type: 'user', id: target.id }, admin.id);
+        if (newImage !== undefined) changes.push(newImage ? (target.image ? 'changed photo' : 'added photo') : 'removed photo');
+        if (changes.length === 0) notice = 'No changes to save.';
+        else {
+          await db
+            .update(schema.user)
+            .set({ name, company: company || null, email, ...(newImage !== undefined ? { image: newImage } : {}) })
+            .where(eq(schema.user.id, target.id))
+            .run();
+          await logClient('client.updated', target, `Updated ${target.name}’s details: ${changes.join('; ')}`);
+          notice = `Saved changes to ${name}.`;
+        }
+        editDraft = null;
+      } else if (intent === 'send-link') {
         // Never signed in yet -> invite wording; otherwise a normal reset email.
         const session = await db.select({ id: schema.session.id }).from(schema.session).where(eq(schema.session.userId, target.id)).limit(1).get();
         const everSignedIn = Boolean(session);
@@ -101,7 +139,8 @@ if (Astro.request.method === 'POST') {
       }
     }
   } catch (err) {
-    if (err instanceof Error && err.message === 'Client not found.') error = err.message;
+    if (err instanceof EditError) editError = err.message;
+    else if (err instanceof Error && err.message === 'Client not found.') error = err.message;
     else if (err instanceof Error && err.message.startsWith('EMAIL:')) error = `The email couldn't be sent: ${err.message.slice(6)}`;
     else error = authErrorMessage(err);
     Astro.response.status = 400;
@@ -119,6 +158,13 @@ const mailOn = emailEnabled();
 // Reopen the Add client pop-up when creating failed (keeps what was typed), or via ?add=1.
 const openAdd = (Astro.request.method === 'POST' && draft.name && Astro.response.status === 400) || Astro.url.searchParams.has('add');
 const plusIcon = 'M12 5v14M5 12h14';
+// The Edit pop-up: reopened after a failed save, or opened by an Edit link (?edit=<id>).
+const editSource = editDraft ? clients.find((c) => c.id === editDraft!.id) : clients.find((c) => c.id === Astro.url.searchParams.get('edit'));
+const editing = editSource
+  ? { ...editSource, ...(editDraft ? { name: editDraft.name, company: editDraft.company, email: editDraft.email } : {}) }
+  : null;
+if (editError && !editing) error = editError;
+const editFormKey = editing ? `${editing.id}-${Date.now()}` : '';
 const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 ---
 
@@ -163,14 +209,21 @@ const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric
         {clients.map((c) => (
           <li id={`client-${c.id}`} class="scroll-mt-24">
             <Card>
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div class="min-w-0">
+              <div class="flex items-start gap-4">
+                <Avatar name={c.name} src={c.image} size="md" />
+                <div class="min-w-0 flex-1">
                   <p class="font-semibold tracking-tight">{c.name}</p>
                   <p class="text-sm text-muted">{c.company || 'No company'}</p>
                   <p class="mt-1 text-sm break-all">{c.email}</p>
                   <p class="mt-1 text-xs text-muted">Added {dateFmt.format(c.createdAt)}</p>
                 </div>
-                {c.banned ? <StatusBadge tone="danger">Disabled</StatusBadge> : <StatusBadge tone="success">Active</StatusBadge>}
+                <div class="flex shrink-0 flex-col items-end gap-2">
+                  {c.banned ? <StatusBadge tone="danger">Disabled</StatusBadge> : <StatusBadge tone="success">Active</StatusBadge>}
+                  <a href={`?edit=${c.id}`} class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm text-primary transition hover:bg-primary-soft" aria-label={`Edit ${c.name}`}>
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+                    Edit
+                  </a>
+                </div>
               </div>
 
               <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-line/70 pt-4">
@@ -264,20 +317,68 @@ const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric
       </form>
     </div>
   </dialog>
+
+  <!-- Edit client (pop-up; opened by a client's Edit link) -->
+  {editing && (
+    <dialog
+      id="edit-client"
+      data-modal
+      data-autoopen
+      open
+      aria-labelledby="edit-client-title"
+      class="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-3xl bg-surface p-0 text-ink shadow-lift ring-1 ring-line backdrop:bg-ink/40 backdrop:backdrop-blur-sm"
+    >
+      <div class="p-6 sm:p-8">
+        <div class="flex items-start justify-between gap-4">
+          <h2 id="edit-client-title" class="font-display text-3xl">Edit client</h2>
+          <form method="dialog">
+            <button type="submit" formnovalidate class="-m-2 rounded-full p-2 text-muted transition hover:bg-primary-soft hover:text-ink" aria-label="Close">
+              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+            </button>
+          </form>
+        </div>
+        {editError && <p role="alert" class="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{editError}</p>}
+        <form method="post" enctype="multipart/form-data" class="mt-6 grid gap-4 sm:grid-cols-2" data-key={editFormKey}>
+          <input type="hidden" name="intent" value="update-client" />
+          <input type="hidden" name="userId" value={editing.id} />
+          <div class="sm:col-span-2">
+            <ImageInput label="Photo" src={editing.image} fallbackName={editing.name} />
+          </div>
+          <label class="block text-sm font-medium">
+            Name
+            <input name="name" value={editing.name} required autocomplete="off" class={input} />
+          </label>
+          <label class="block text-sm font-medium">
+            Company <span class="font-normal text-muted">(optional)</span>
+            <input name="company" value={editing.company ?? ''} autocomplete="off" class={input} />
+          </label>
+          <label class="block text-sm font-medium sm:col-span-2">
+            Email <span class="font-normal text-muted">(they sign in with this)</span>
+            <input type="email" name="email" value={editing.email} required autocomplete="off" class={input} />
+          </label>
+          <div class="flex flex-wrap gap-3 sm:col-span-2">
+            <Button type="submit">Save changes</Button>
+            <Button type="submit" variant="ghost" formmethod="dialog" formnovalidate>Cancel</Button>
+          </div>
+        </form>
+      </div>
+    </dialog>
+  )}
 </AppLayout>
 
 <script>
-  // Open the pop-up in place instead of following the ?add=1 link (which still works without JavaScript).
-  const dialog = document.getElementById('add-client') as HTMLDialogElement | null;
-  if (dialog) {
-    for (const el of document.querySelectorAll<HTMLElement>('[data-open-dialog="add-client"]')) {
-      el.addEventListener('click', (e) => {
-        e.preventDefault();
-        dialog.showModal();
-        dialog.querySelector<HTMLInputElement>('input[name="name"]')?.focus();
-      });
-    }
-    // Server-rendered open (after a failed create, or ?add=1): reopen as a proper modal.
+  // Pop-ups: links with data-open-dialog="<id>" open that dialog in place (their href still works
+  // without JavaScript). A dialog the server rendered open (data-autoopen) becomes a proper modal.
+  for (const el of document.querySelectorAll<HTMLElement>('[data-open-dialog]')) {
+    el.addEventListener('click', (e) => {
+      const dialog = document.getElementById(el.dataset.openDialog!) as HTMLDialogElement | null;
+      if (!dialog) return;
+      e.preventDefault();
+      dialog.showModal();
+      dialog.querySelector<HTMLInputElement>('input:not([type=hidden]):not([type=file])')?.focus();
+    });
+  }
+  for (const dialog of document.querySelectorAll<HTMLDialogElement>('dialog')) {
     if (dialog.hasAttribute('data-autoopen')) {
       dialog.close();
       dialog.showModal();
@@ -286,9 +387,9 @@ const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric
     dialog.addEventListener('click', (e) => {
       if (e.target === dialog) dialog.close();
     });
-    // Drop ?add=1 so a refresh doesn't reopen it.
+    // Drop ?add=1 / ?edit=… so a refresh doesn't reopen it.
     dialog.addEventListener('close', () => {
-      if (location.search.includes('add=1')) history.replaceState(null, '', location.pathname);
+      if (/[?&](add|edit)=/.test(location.search)) history.replaceState(null, '', location.pathname);
     });
   }
 </script>

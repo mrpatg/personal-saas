@@ -8,6 +8,7 @@ import Button from './ui/Button.astro';
 import { textareaClass } from './ui/forms';
 import { MAX_COMMENT_LENGTH, type TaskComment } from '../lib/work';
 import { ROLES } from '../lib/auth';
+import Avatar from './ui/Avatar.astro';
 
 interface Props {
   comments: TaskComment[];
@@ -19,8 +20,6 @@ interface Props {
 }
 const { comments, viewerId, draft = '', placeholder = 'Write a comment…' } = Astro.props;
 
-const initials = (name: string) =>
-  name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 // Rendered in UTC on the server; the script below switches to the viewer's own time zone.
 const fallbackFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short' });
 ---
@@ -34,14 +33,7 @@ const fallbackFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'num
       <ol class="space-y-6">
         {comments.map((c) => (
           <li id={`comment-${c.id}`} class="flex gap-3 sm:gap-4">
-            <span
-              class={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
-                c.authorRole === ROLES.admin ? 'bg-primary text-primary-foreground' : 'bg-primary-soft text-primary'
-              }`}
-              aria-hidden="true"
-            >
-              {initials(c.authorName)}
-            </span>
+            <Avatar name={c.authorName} src={c.authorImage} size="sm" tone={c.authorRole === ROLES.admin ? 'strong' : 'soft'} />
             <div class="min-w-0 flex-1">
               <p class="text-sm">
                 <span class="font-medium">{c.authorId === viewerId ? 'You' : c.authorName}</span>

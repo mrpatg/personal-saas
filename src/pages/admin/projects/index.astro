@@ -13,6 +13,7 @@ import { adminNav } from '../../../lib/nav';
 import { field } from '../../../lib/auth-helpers';
 import { allProjects, clientOptions, formatDate, parseDate, projectStatus } from '../../../lib/projects';
 import { getDb, schema } from '../../../db';
+import Avatar from '../../../components/ui/Avatar.astro';
 import { logActivity } from '../../../lib/activity';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
@@ -93,13 +94,19 @@ const clientLabel = (c: { name: string; company: string | null }) => (c.company 
     ) : (
       <ul class="grid gap-4 xl:grid-cols-2">
         {projects.map((p) => (
-          <li>
+          <li class="min-w-0">
             <a href={`/admin/projects/${p.id}`} class="block h-full rounded-3xl transition hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-primary">
               <Card class="h-full">
                 <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0">
-                    <p class="font-semibold tracking-tight">{p.name}</p>
-                    <p class="text-sm text-muted">{p.clientName}{p.clientCompany ? ` · ${p.clientCompany}` : ''}</p>
+                  <div class="flex min-w-0 items-center gap-3">
+                    <Avatar name={p.name} src={p.image} size="md" shape="square" />
+                    <div class="min-w-0">
+                      <p class="font-semibold tracking-tight">{p.name}</p>
+                      <p class="mt-0.5 flex items-center gap-1.5 text-sm text-muted">
+                        <Avatar name={p.clientName} src={p.clientImage} size="xs" />
+                        <span class="truncate">{p.clientName}{p.clientCompany ? ` · ${p.clientCompany}` : ''}</span>
+                      </p>
+                    </div>
                   </div>
                   <StatusBadge tone={projectStatus[p.status].tone}>{projectStatus[p.status].label}</StatusBadge>
                 </div>

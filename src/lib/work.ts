@@ -136,6 +136,7 @@ export function taskComments(taskId: string) {
       authorId: schema.taskComment.authorId,
       authorName: schema.user.name,
       authorRole: schema.user.role,
+      authorImage: schema.user.image,
     })
     .from(schema.taskComment)
     .innerJoin(schema.user, eq(schema.taskComment.authorId, schema.user.id))

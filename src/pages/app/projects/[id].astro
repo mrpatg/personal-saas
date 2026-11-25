@@ -9,6 +9,7 @@ import { clientNav } from '../../../lib/nav';
 import { CLIENT_VISIBLE_STATUSES, countsFrom, formatDate, projectStatus, projectTasks, taskStatus } from '../../../lib/projects';
 import CommentCount from '../../../components/CommentCount.astro';
 import { commentCounts } from '../../../lib/work';
+import Avatar from '../../../components/ui/Avatar.astro';
 import { getDb, schema } from '../../../db';
 
 const user = Astro.locals.user!; // guaranteed by src/middleware.ts
@@ -40,7 +41,10 @@ const dates = [
 <AppLayout title={project.name} nav={clientNav} active="/app/projects" user={{ name: user.name, company: user.company ?? undefined }} signOut>
   <a href="/app/projects" class="text-sm text-muted hover:text-ink">← All projects</a>
   <div class="mt-3 flex flex-wrap items-start justify-between gap-4">
-    <h1 class="min-w-0 font-display text-4xl break-words sm:text-5xl">{project.name}</h1>
+    <div class="flex min-w-0 items-center gap-4">
+      <Avatar name={project.name} src={project.image} size="lg" shape="square" />
+      <h1 class="min-w-0 font-display text-4xl break-words sm:text-5xl">{project.name}</h1>
+    </div>
     <StatusBadge tone={projectStatus[project.status].tone}>{projectStatus[project.status].label}</StatusBadge>
   </div>
   {dates && <p class="mt-2 text-sm text-muted">{dates}</p>}
