@@ -34,6 +34,8 @@ import {
   voidInvoice,
 } from '../../../lib/invoices';
 import { getDb, schema } from '../../../db';
+import { emailEnabled, inBackground } from '../../../lib/email';
+import { notifyInvoiceSent } from '../../../lib/notify';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
@@ -121,7 +123,10 @@ if (Astro.request.method === 'POST') {
     if (lines.length === 0) error = 'Add at least one line before sending.';
     else {
       await sendInvoice(inv);
-      notice = 'sent';
+      if (emailEnabled() && form.get('notify') === 'on') {
+        await inBackground(Astro.locals, notifyInvoiceSent(inv, Astro.url.origin));
+        notice = 'sent-emailed';
+      } else notice = 'sent';
     }
   } else if (intent === 'delete') {
     await deleteDraft(inv);
@@ -172,7 +177,8 @@ const notice =
       ? n === 'pulled-0' ? 'No newer unbilled work to add.' : `Added ${n.slice(7)} line(s) of newer work.`
       : ({
           saved: 'Invoice details saved.',
-          sent: 'Invoice sent. Your client can now see it in their portal. (Email notices arrive with the email feature, so let them know it’s there.)',
+          sent: 'Invoice sent. Your client can now see it in their portal. No email went out, so let them know it’s there.',
+          'sent-emailed': 'Invoice sent. Your client can see it in their portal, and we’re emailing them a link to it.',
           paid: 'Marked as paid.',
           voided: 'Invoice voided. Its work is unbilled again and can go on a new invoice.',
         } as Record<string, string>)[n];
@@ -201,6 +207,12 @@ const small = 'h-9 rounded-xl bg-canvas px-3 text-sm ring-1 ring-line outline-no
             <p class="mt-2 text-sm text-muted">Draft. Only you can see it.</p>
             <form method="post" class="mt-5">
               <input type="hidden" name="intent" value="send" />
+              {emailEnabled() && (
+                <label class="mb-3 flex items-center gap-2 text-sm">
+                  <input type="checkbox" name="notify" value="on" checked class="h-4 w-4 accent-primary" />
+                  Email the client a link
+                </label>
+              )}
               <Button type="submit" size="lg" class="w-full" disabled={lines.length === 0}>Send to client</Button>
             </form>
             <p class="mt-2 text-xs text-muted">Sending gives it the next invoice number, locks it and shows it in the client’s portal.</p>

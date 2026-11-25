@@ -8,7 +8,7 @@
   "vars": {
     // Custom domains that serve the app, comma-separated (e.g. "portal.example.com").
     // localhost and *.workers.dev are always allowed. Used by Better Auth.
-    "AUTH_HOSTS": ""
+    "AUTH_HOSTS": "portal.patrickgodbey.com"
   },
   "d1_databases": [
     {

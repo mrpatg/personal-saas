@@ -27,6 +27,15 @@ export interface SiteConfig {
   /** Billing currency (ISO 4217 code, e.g. "USD") and the locale money is formatted in. */
   currency: string;
   locale: string;
+  /** Outgoing email (sent through Resend; the domain must be verified there). */
+  email: {
+    /** Sender, e.g. 'Jane Doe <portal@example.com>'. */
+    from: string;
+    /** Where client replies go. */
+    replyTo: string;
+    /** Where notices for the admin go (e.g. a client commented on a task). */
+    adminNotify: string;
+  };
   /** Invoice details. */
   billing: {
     /** Name shown in the invoice's "From" block (usually the business name). */
@@ -84,6 +93,11 @@ export const site: SiteConfig = {
   contactEmail,
   currency: 'USD',
   locale: 'en-US',
+  email: {
+    from: 'Patrick Godbey <portal@patrickgodbey.com>',
+    replyTo: contactEmail,
+    adminNotify: contactEmail,
+  },
   billing: {
     from: 'Patrick Godbey',
     address: ['218 Roop Drive', 'Mount Hope, WV 25880'],

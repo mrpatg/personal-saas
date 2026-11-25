@@ -10,7 +10,8 @@ import Card from '../../components/ui/Card.astro';
 import Button from '../../components/ui/Button.astro';
 import StatusBadge from '../../components/ui/StatusBadge.astro';
 import { adminNav } from '../../lib/nav';
-import { getAuth, ROLES } from '../../lib/auth';
+import { getAuth, PASSWORD_LINK_HOURS, ROLES, sendPasswordLink } from '../../lib/auth';
+import { emailEnabled } from '../../lib/email';
 import { authErrorMessage, field, generatePassword } from '../../lib/auth-helpers';
 import { getDb, schema } from '../../db';
 import { inputClass } from '../../components/ui/forms';
@@ -33,7 +34,9 @@ if (Astro.request.method === 'POST') {
   try {
     if (intent === 'create') {
       draft = { name: field(form, 'name'), company: field(form, 'company'), email: field(form, 'email') };
-      const password = field(form, 'password') || generatePassword();
+      const invite = emailEnabled() && form.get('invite') === 'on';
+      // With an invite, the client picks their own password; this random one is never shown.
+      const password = (invite ? '' : field(form, 'password')) || generatePassword(4);
       await getAuth().api.createUser({
         headers,
         body: {
@@ -44,14 +47,34 @@ if (Astro.request.method === 'POST') {
           data: { company: draft.company || null },
         },
       });
-      credentials = { title: `${draft.name} can now sign in`, email: draft.email.toLowerCase(), password };
+      if (invite) {
+        const sent = await sendPasswordLink(draft.email, 'invite', headers);
+        if (sent.ok) notice = `Invite sent to ${draft.email}. They'll choose their own password from the email.`;
+        else {
+          // Fall back to a password the admin can pass on by hand.
+          const fallback = generatePassword();
+          const created = await db.select().from(schema.user).where(eq(schema.user.email, draft.email.toLowerCase())).get();
+          if (created) await getAuth().api.setUserPassword({ headers, body: { userId: created.id, newPassword: fallback } });
+          error = `The account was created, but the invite email failed (${sent.error}). Send them the details below instead.`;
+          credentials = { title: `${draft.name} can now sign in`, email: draft.email.toLowerCase(), password: fallback };
+        }
+      } else {
+        credentials = { title: `${draft.name} can now sign in`, email: draft.email.toLowerCase(), password };
+      }
       draft = { name: '', company: '', email: '' };
     } else {
       // Every other action targets an existing client (never an admin).
       const target = await db.select().from(schema.user).where(eq(schema.user.id, field(form, 'userId'))).get();
       if (!target || target.role !== ROLES.client) throw new Error('Client not found.');
 
-      if (intent === 'reset-password') {
+      if (intent === 'send-link') {
+        // Never signed in yet -> invite wording; otherwise a normal reset email.
+        const session = await db.select({ id: schema.session.id }).from(schema.session).where(eq(schema.session.userId, target.id)).limit(1).get();
+        const everSignedIn = Boolean(session);
+        const sent = await sendPasswordLink(target.email, everSignedIn ? 'reset' : 'invite', headers);
+        if (sent.ok) notice = `${everSignedIn ? 'Password reset link' : 'Invite'} emailed to ${target.email}.`;
+        else throw new Error(`EMAIL:${sent.error}`);
+      } else if (intent === 'reset-password') {
         const password = field(form, 'password') || generatePassword();
         await getAuth().api.setUserPassword({ headers, body: { userId: target.id, newPassword: password } });
         await getAuth().api.revokeUserSessions({ headers, body: { userId: target.id } });
@@ -67,7 +90,9 @@ if (Astro.request.method === 'POST') {
       }
     }
   } catch (err) {
-    error = err instanceof Error && err.message === 'Client not found.' ? err.message : authErrorMessage(err);
+    if (err instanceof Error && err.message === 'Client not found.') error = err.message;
+    else if (err instanceof Error && err.message.startsWith('EMAIL:')) error = `The email couldn't be sent: ${err.message.slice(6)}`;
+    else error = authErrorMessage(err);
     Astro.response.status = 400;
   }
 }
@@ -79,6 +104,7 @@ const clients = await db
   .orderBy(asc(schema.user.name))
   .all();
 
+const mailOn = emailEnabled();
 const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 ---
 
@@ -145,6 +171,13 @@ const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric
                     <Button type="submit" size="sm">Set password</Button>
                   </form>
                 </details>
+                {mailOn && !c.banned && (
+                  <form method="post">
+                    <input type="hidden" name="intent" value="send-link" />
+                    <input type="hidden" name="userId" value={c.id} />
+                    <Button type="submit" size="sm" variant="ghost">Email a password link</Button>
+                  </form>
+                )}
                 <Button href={`/admin/projects?client=${c.id}`} size="sm" variant="ghost">Projects</Button>
                 <form method="post">
                   <input type="hidden" name="userId" value={c.id} />
@@ -166,7 +199,9 @@ const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric
   <section id="add-client" class="mt-12 scroll-mt-24">
     <Card class="max-w-2xl">
       <h2 class="font-display text-3xl">Add a client</h2>
-      <p class="mt-1 text-sm text-muted">They can sign in right away with the email and password you give them.</p>
+      <p class="mt-1 text-sm text-muted">
+        {mailOn ? 'They get an email to choose their own password, or you can set one and send it yourself.' : 'They can sign in right away with the email and password you give them.'}
+      </p>
       <form method="post" class="mt-6 grid gap-4 sm:grid-cols-2">
         <input type="hidden" name="intent" value="create" />
         <label class="block text-sm font-medium">
@@ -181,8 +216,14 @@ const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric
           Email
           <input type="email" name="email" value={draft.email} required autocomplete="off" class={input} />
         </label>
+        {mailOn && (
+          <label class="flex items-start gap-2 text-sm sm:col-span-2">
+            <input type="checkbox" name="invite" checked class="mt-0.5 h-4 w-4 accent-primary" />
+            <span><span class="font-medium">Email them an invite</span> <span class="text-muted">to choose their own password (the link lasts {PASSWORD_LINK_HOURS / 24} days)</span></span>
+          </label>
+        )}
         <label class="block text-sm font-medium sm:col-span-2">
-          Temporary password <span class="font-normal text-muted">(leave blank to generate one)</span>
+          Temporary password <span class="font-normal text-muted">({mailOn ? 'only used without an invite; ' : ''}leave blank to generate one)</span>
           <input type="text" name="password" minlength="10" autocomplete="off" class={input} />
         </label>
         <div class="sm:col-span-2">
