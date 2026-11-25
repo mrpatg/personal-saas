@@ -27,6 +27,8 @@ export interface SiteConfig {
   /** Billing currency (ISO 4217 code, e.g. "USD") and the locale money is formatted in. */
   currency: string;
   locale: string;
+  /** IANA time zone used to show times, e.g. in the activity log. */
+  timeZone: string;
   /** Outgoing email (sent through Resend; the domain must be verified there). */
   email: {
     /** Sender, e.g. 'Jane Doe <portal@example.com>'. */
@@ -35,6 +37,8 @@ export interface SiteConfig {
     replyTo: string;
     /** Where notices for the admin go (e.g. a client commented on a task). */
     adminNotify: string;
+    /** Blind-copy `adminNotify` on invoice emails sent to clients, so you keep a copy. */
+    copyInvoicesToAdmin: boolean;
   };
   /** Invoice details. */
   billing: {
@@ -93,10 +97,13 @@ export const site: SiteConfig = {
   contactEmail,
   currency: 'USD',
   locale: 'en-US',
+  timeZone: 'America/New_York',
   email: {
-    from: 'Patrick Godbey <portal@patrickgodbey.com>',
+    // Must be on a domain verified in Resend (portal.patrickgodbey.com is).
+    from: 'Patrick Godbey <patrick@portal.patrickgodbey.com>',
     replyTo: contactEmail,
     adminNotify: contactEmail,
+    copyInvoicesToAdmin: true,
   },
   billing: {
     from: 'Patrick Godbey',

@@ -37,6 +37,7 @@ src/
   lib/invoices.ts     # invoice lifecycle (draft from unbilled work, edit, send, pay, void), numbering, queries
   lib/email.ts        # sendEmail() through Resend, renderEmail() branded template, inBackground()
   lib/notify.ts       # notification emails: invoice sent, task comments, payment received
+  lib/activity.ts     # activity log: logActivity() (never throws), recentActivity(), subjectActivity()
   lib/stripe.ts       # Stripe Checkout for invoices (REST via fetch), webhook signature check, applyCheckoutSession()
   middleware.ts       # loads the session into Astro.locals and guards /admin and /app
   styles/global.css   # Tailwind entry + brand color tokens
@@ -105,7 +106,10 @@ drizzle.config.ts     # drizzle-kit config
   and the sending domain verified in Resend; without the key, emails are
   logged and skipped and the UI falls back (admins see temporary passwords,
   "Forgot password" says to get in touch). Sender, reply-to and the admin
-  notice address are in `site.email`. Password reset and invites both use
+  notice address are in `site.email`; the sender must be on a domain verified
+  in Resend (otherwise Resend returns 403). Invoice emails blind-copy
+  `adminNotify` when `copyInvoicesToAdmin` is on, and a sent invoice can be
+  emailed again ("Email the client a link") or its link copied. Password reset and invites both use
   Better Auth's reset flow (`sendPasswordLink()` in `src/lib/auth.ts`;
   links last `PASSWORD_LINK_HOURS`) and land on `/reset-password`, reached
   from `/forgot-password`. Notices (`src/lib/notify.ts`) never throw; send
@@ -118,6 +122,16 @@ drizzle.config.ts     # drizzle-kit config
   `applyCheckoutSession()`, which is idempotent and only flips `sent` to
   `paid` (`paid_via = 'stripe'`). Voiding or marking paid by hand expires
   any open session.
+- **Activity log** (`activity_log`, `src/lib/activity.ts`). After any action
+  succeeds, call `logActivity(Astro.locals.user, { action, summary,
+  subjectType, subjectId, clientId }, Astro.request)` with a readable
+  one-sentence summary (e.g. "Sent INV-1004 ($25.00)"). Automatic actions use
+  `{ system: 'Stripe' }` as the actor. Actor name and summary are stored as
+  text so history survives renames and deletes. Admins read it at
+  `/admin/activity` (filter by kind and client), on the admin home, and in the
+  History section of each invoice. Times show in `site.timeZone`. Client
+  invoice views are logged at most once an hour per invoice. New features
+  should log their actions too.
 - After changing `wrangler.jsonc`, run `npm run cf-typegen` to refresh
   `worker-configuration.d.ts`.
 - Small commits with clear messages, one working step at a time.

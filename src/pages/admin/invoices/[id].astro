@@ -20,6 +20,7 @@ import {
   formatQuantity,
   invoiceLines,
   invoiceName,
+  invoiceNumber,
   markPaid,
   markUnpaid,
   parseQuantity,
@@ -37,6 +38,8 @@ import { getDb, schema } from '../../../db';
 import { emailEnabled, inBackground } from '../../../lib/email';
 import { notifyInvoiceSent } from '../../../lib/notify';
 import { expireCheckout, stripeEnabled, stripePaymentUrl } from '../../../lib/stripe';
+import { logActivity, subjectActivity } from '../../../lib/activity';
+import ActivityList from '../../../components/ActivityList.astro';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
@@ -57,6 +60,29 @@ if (Astro.request.method === 'POST') {
   let notice = '';
   let anchor = '';
   const isDraft = inv.status === 'draft';
+  const label = inv.number == null ? 'the draft invoice' : invoiceNumber(inv);
+  const log = (action: string, summary: string) =>
+    logActivity(admin, { action, summary, subjectType: 'invoice', subjectId: id, clientId: inv.clientId }, Astro.request);
+  /** Emails the client a link in the background and logs how it went. */
+  const emailLink = (sentInv: typeof inv, reminder: boolean) =>
+    inBackground(
+      Astro.locals,
+      notifyInvoiceSent(sentInv, Astro.url.origin, { reminder }).then((r) =>
+        logActivity(
+          admin,
+          {
+            action: r.ok ? 'invoice.emailed' : 'invoice.email_failed',
+            summary: r.ok
+              ? `Emailed ${invoiceNumber(sentInv)} to ${r.to}${reminder ? ' (re-sent)' : ''}`
+              : `Couldn’t email ${invoiceNumber(sentInv)}${r.to ? ` to ${r.to}` : ''}: ${r.error}`,
+            subjectType: 'invoice',
+            subjectId: id,
+            clientId: inv.clientId,
+          },
+          Astro.request,
+        ),
+      ),
+    );
 
   /** Reads description/details/quantity/rate fields shared by the line forms. */
   const lineInput = () => {
@@ -87,6 +113,7 @@ if (Astro.request.method === 'POST') {
         .where(eq(schema.invoice.id, id))
         .run();
       await recalcTotals(id);
+      await log('invoice.updated', `Edited the details of ${label}`);
       notice = 'saved';
       anchor = 'edit';
     }
@@ -95,6 +122,7 @@ if (Astro.request.method === 'POST') {
     if (typeof input === 'string') error = input;
     else {
       await addCustomLine(inv, input);
+      await log('invoice.line_added', `Added “${input.description}” to ${label}`);
       anchor = 'lines';
     }
   } else if (intent === 'update-line' || intent === 'remove-line') {
@@ -106,31 +134,45 @@ if (Astro.request.method === 'POST') {
     if (!line) error = 'That line no longer exists.';
     else if (intent === 'remove-line') {
       await removeLine(line);
+      await log('invoice.line_removed', `Removed “${line.description}” (${formatMoney(line.amountCents)}) from ${label}`);
       anchor = 'lines';
     } else {
       const input = lineInput();
       if (typeof input === 'string') error = input;
       else {
         await updateLine(line, input);
+        await log('invoice.line_updated', `Changed “${input.description}” on ${label}`);
         anchor = `line-${line.id}`;
       }
     }
   } else if (intent === 'pull-work') {
     const added = await pullUnbilledWork(inv, parseDate(field(form, 'workThrough')) ?? today);
     notice = added ? `pulled-${added}` : 'pulled-0';
+    if (added) await log('invoice.work_added', `Added ${added} line${added === 1 ? '' : 's'} of newer work to ${label}`);
     anchor = 'lines';
   } else if (intent === 'send') {
     const lines = await invoiceLines(id);
     if (lines.length === 0) error = 'Add at least one line before sending.';
     else {
       await sendInvoice(inv);
-      if (emailEnabled() && form.get('notify') === 'on') {
-        await inBackground(Astro.locals, notifyInvoiceSent(inv, Astro.url.origin));
+      const sentInv = (await load()) ?? inv;
+      const emailing = emailEnabled() && form.get('notify') === 'on';
+      await log('invoice.sent', `Sent ${invoiceNumber(sentInv)} (${formatMoney(sentInv.totalCents)})${emailing ? '' : ' without emailing the client'}`);
+      if (emailing) {
+        await emailLink(sentInv, false);
         notice = 'sent-emailed';
       } else notice = 'sent';
     }
+  } else if (intent === 'email-link') {
+    if (inv.status !== 'sent') error = 'Only an unpaid sent invoice can be emailed again.';
+    else if (!emailEnabled()) error = 'Email isn’t set up yet (RESEND_API_KEY is missing). Copy the link instead.';
+    else {
+      await emailLink(inv, true);
+      notice = 'emailed';
+    }
   } else if (intent === 'delete') {
     await deleteDraft(inv);
+    await log('invoice.deleted', `Deleted a draft invoice (${formatMoney(inv.totalCents)})`);
     return Astro.redirect('/admin/invoices?status=draft', 303);
   } else if (intent === 'mark-paid') {
     const paidDate = parseDate(field(form, 'paidDate'));
@@ -139,17 +181,22 @@ if (Astro.request.method === 'POST') {
     else {
       await markPaid(inv, paidDate);
       await expireCheckout(inv);
+      await log('invoice.paid', `Marked ${label} paid (received ${formatDate(paidDate)})`);
       notice = 'paid';
     }
   } else if (intent === 'mark-unpaid') {
     if (inv.status !== 'paid') error = 'This invoice isn’t marked paid.';
-    else await markUnpaid(inv);
+    else {
+      await markUnpaid(inv);
+      await log('invoice.unpaid', `Marked ${label} unpaid again`);
+    }
   } else if (intent === 'void') {
     if (inv.status !== 'sent') error = 'Only an unpaid sent invoice can be voided.';
     else if (field(form, 'confirm') !== 'void') error = 'Tick the box to confirm voiding this invoice.';
     else {
       await voidInvoice(inv);
       await expireCheckout(inv);
+      await log('invoice.voided', `Voided ${label}`);
       notice = 'voided';
     }
   } else error = 'Unknown action.';
@@ -159,11 +206,13 @@ if (Astro.request.method === 'POST') {
 }
 
 const current = (await load()) ?? inv;
-const [lines, client, project] = await Promise.all([
+const [lines, client, project, history] = await Promise.all([
   invoiceLines(id),
   db.select().from(schema.user).where(eq(schema.user.id, current.clientId)).get(),
   current.projectId ? db.select().from(schema.project).where(eq(schema.project.id, current.projectId)).get() : undefined,
+  subjectActivity('invoice', id),
 ]);
+const clientUrl = `${Astro.url.origin}/app/invoices/${id}`;
 const newerWork = current.status === 'draft' && current.projectId ? await unbilledEntries(current.projectId) : [];
 const newerCents = newerWork.reduce((s, r) => s + r.entry.amountCents, 0);
 
@@ -180,9 +229,10 @@ const notice =
       ? n === 'pulled-0' ? 'No newer unbilled work to add.' : `Added ${n.slice(7)} line(s) of newer work.`
       : ({
           saved: 'Invoice details saved.',
-          sent: 'Invoice sent. Your client can now see it in their portal. No email went out, so let them know it’s there.',
+          sent: 'Invoice sent. Your client can now see it in their portal. No email went out: use “Email the client a link” or copy the link to send it yourself.',
           'sent-emailed': 'Invoice sent. Your client can see it in their portal, and we’re emailing them a link to it.',
           paid: 'Marked as paid.',
+          emailed: 'We’re emailing your client a link to this invoice. It’ll show in the history below once it’s gone.',
           voided: 'Invoice voided. Its work is unbilled again and can go on a new invoice.',
         } as Record<string, string>)[n];
 
@@ -226,6 +276,19 @@ const small = 'h-9 rounded-xl bg-canvas px-3 text-sm ring-1 ring-line outline-no
           <>
             <p class="mt-2 text-sm text-muted">Sent {current.sentAt ? formatDate(current.sentAt.toISOString().slice(0, 10)) : ''} · Due {formatDate(current.dueDate)}</p>
             {stripeEnabled() && <p class="mt-1 text-xs text-muted">The client can pay online; it’ll be marked paid automatically.</p>}
+            <div class="mt-5 space-y-2 rounded-2xl bg-canvas p-4 ring-1 ring-line">
+              {emailEnabled() && (
+                <form method="post">
+                  <input type="hidden" name="intent" value="email-link" />
+                  <Button type="submit" variant="secondary" size="sm" class="w-full">Email the client a link</Button>
+                </form>
+              )}
+              <label class="block text-xs font-medium text-muted">
+                Or copy the link to send yourself
+                <input readonly value={clientUrl} onfocus="this.select()" class={`${small} mt-1 text-ink`} />
+              </label>
+              <p class="text-xs text-muted">The client signs in to view and pay it.</p>
+            </div>
             <form method="post" class="mt-5 space-y-3">
               <input type="hidden" name="intent" value="mark-paid" />
               <label class="block text-sm font-medium">
@@ -409,4 +472,10 @@ const small = 'h-9 rounded-xl bg-canvas px-3 text-sm ring-1 ring-line outline-no
       </section>
     </div>
   )}
+
+  <section id="history" class="mt-12 scroll-mt-24 print:hidden">
+    <h2 class="font-display text-3xl">History</h2>
+    <p class="mt-1 text-sm text-muted">Everything done to this invoice, newest first.</p>
+    <ActivityList rows={history} class="mt-5" />
+  </section>
 </AppLayout>
