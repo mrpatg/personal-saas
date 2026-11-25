@@ -300,11 +300,11 @@ export async function sendInvoice(inv: Invoice) {
 }
 
 export async function markPaid(inv: Invoice, paidDate: string) {
-  await getDb().update(schema.invoice).set({ status: 'paid', paidDate }).where(eq(schema.invoice.id, inv.id)).run();
+  await getDb().update(schema.invoice).set({ status: 'paid', paidDate, paidVia: 'manual' }).where(eq(schema.invoice.id, inv.id)).run();
 }
 
 export async function markUnpaid(inv: Invoice) {
-  await getDb().update(schema.invoice).set({ status: 'sent', paidDate: null }).where(eq(schema.invoice.id, inv.id)).run();
+  await getDb().update(schema.invoice).set({ status: 'sent', paidDate: null, paidVia: null }).where(eq(schema.invoice.id, inv.id)).run();
 }
 
 /** Cancels a sent invoice. Its number stays used; its work becomes unbilled again. */

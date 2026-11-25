@@ -36,6 +36,7 @@ import {
 import { getDb, schema } from '../../../db';
 import { emailEnabled, inBackground } from '../../../lib/email';
 import { notifyInvoiceSent } from '../../../lib/notify';
+import { expireCheckout, stripeEnabled, stripePaymentUrl } from '../../../lib/stripe';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
@@ -137,6 +138,7 @@ if (Astro.request.method === 'POST') {
     else if (!paidDate) error = 'Choose the date the payment arrived.';
     else {
       await markPaid(inv, paidDate);
+      await expireCheckout(inv);
       notice = 'paid';
     }
   } else if (intent === 'mark-unpaid') {
@@ -147,6 +149,7 @@ if (Astro.request.method === 'POST') {
     else if (field(form, 'confirm') !== 'void') error = 'Tick the box to confirm voiding this invoice.';
     else {
       await voidInvoice(inv);
+      await expireCheckout(inv);
       notice = 'voided';
     }
   } else error = 'Unknown action.';
@@ -222,6 +225,7 @@ const small = 'h-9 rounded-xl bg-canvas px-3 text-sm ring-1 ring-line outline-no
         {current.status === 'sent' && (
           <>
             <p class="mt-2 text-sm text-muted">Sent {current.sentAt ? formatDate(current.sentAt.toISOString().slice(0, 10)) : ''} · Due {formatDate(current.dueDate)}</p>
+            {stripeEnabled() && <p class="mt-1 text-xs text-muted">The client can pay online; it’ll be marked paid automatically.</p>}
             <form method="post" class="mt-5 space-y-3">
               <input type="hidden" name="intent" value="mark-paid" />
               <label class="block text-sm font-medium">
@@ -235,7 +239,12 @@ const small = 'h-9 rounded-xl bg-canvas px-3 text-sm ring-1 ring-line outline-no
 
         {current.status === 'paid' && (
           <>
-            <p class="mt-2 text-sm text-muted">Paid {formatDate(current.paidDate)}</p>
+            <p class="mt-2 text-sm text-muted">
+              Paid {formatDate(current.paidDate)}{current.paidVia === 'stripe' ? ' online via Stripe' : ''}
+            </p>
+            {current.stripePaymentIntentId && (
+              <a href={stripePaymentUrl(current.stripePaymentIntentId)} target="_blank" rel="noopener" class="mt-1 inline-block text-sm text-primary hover:underline">View payment in Stripe ↗</a>
+            )}
             <form method="post" class="mt-4">
               <input type="hidden" name="intent" value="mark-unpaid" />
               <button type="submit" class="text-sm text-muted hover:text-ink hover:underline">Undo: mark as unpaid</button>
@@ -244,6 +253,11 @@ const small = 'h-9 rounded-xl bg-canvas px-3 text-sm ring-1 ring-line outline-no
         )}
 
         {current.status === 'void' && <p class="mt-2 text-sm text-muted">Voided. The client still sees it, marked Void.</p>}
+        {current.status === 'void' && current.stripePaymentIntentId && (
+          <p class="mt-2 text-sm text-rose-700">
+            A Stripe payment arrived after this was voided. <a href={stripePaymentUrl(current.stripePaymentIntentId)} target="_blank" rel="noopener" class="underline">Review or refund it in Stripe ↗</a>
+          </p>
+        )}
 
         <div class="mt-5 border-t border-line pt-4">
           <Button variant="ghost" size="sm" class="w-full" onclick="window.print()">Print or save as PDF</Button>
