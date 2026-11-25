@@ -4,7 +4,7 @@
  * directly, so work entries always stay in step with the invoices that
  * claim them (an entry is billed by at most one non-void invoice).
  */
-import { and, asc, desc, eq, inArray, isNull, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql, type SQL } from 'drizzle-orm';
 import type { Tone } from '../components/ui/tones';
 import { getDb, schema } from '../db';
 import { site } from '../config/site';
@@ -28,7 +28,9 @@ export const invoiceStatus: Record<InvoiceDisplayStatus, { label: string; tone: 
 };
 
 /** Today's date as YYYY-MM-DD (UTC). */
-export const todayISO = () => new Date().toISOString().slice(0, 10);
+/** Today's date (YYYY-MM-DD) in the business's time zone (site.timeZone), not UTC. */
+const isoDateFmt = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: site.timeZone });
+export const todayISO = () => isoDateFmt.format(new Date());
 
 export function displayStatus(inv: Pick<Invoice, 'status' | 'dueDate'>, today = todayISO()): InvoiceDisplayStatus {
   return inv.status === 'sent' && inv.dueDate < today ? 'overdue' : inv.status;
@@ -392,4 +394,69 @@ export async function unbilledByProject(): Promise<Map<string, number>> {
     .groupBy(schema.task.projectId)
     .all();
   return new Map(rows.filter((r) => r.cents > 0).map((r) => [r.projectId, r.cents]));
+}
+
+/* ---------- Money summary (admin invoices screen) ---------- */
+
+export const MONEY_PERIODS = {
+  today: 'Today',
+  week: 'Week',
+  month: 'Month',
+  ytd: 'YTD',
+  all: 'All time',
+} as const;
+export type MoneyPeriod = keyof typeof MONEY_PERIODS;
+export const isMoneyPeriod = (v: string): v is MoneyPeriod => v in MONEY_PERIODS;
+
+/** First day (YYYY-MM-DD) of a period ending today. Weeks start on Monday. */
+export function periodStart(period: MoneyPeriod, today = todayISO()): string {
+  const d = new Date(`${today}T00:00:00Z`);
+  if (period === 'today') return today;
+  if (period === 'week') return addDays(today, -((d.getUTCDay() + 6) % 7));
+  if (period === 'month') return `${today.slice(0, 8)}01`;
+  if (period === 'ytd') return `${today.slice(0, 4)}-01-01`;
+  return '0000-01-01';
+}
+
+/**
+ * Invoiced (sent or paid invoices issued in the period) and collected
+ * (payments received in the period, by paid date) for a period ending today.
+ */
+export async function moneySummary(period: MoneyPeriod) {
+  const i = schema.invoice;
+  const from = periodStart(period);
+  const to = todayISO();
+  const db = getDb();
+  const [invoiced, collected] = await Promise.all([
+    db
+      .select({ cents: sql<number>`coalesce(sum(${i.totalCents}), 0)`, n: sql<number>`count(*)` })
+      .from(i)
+      .where(and(inArray(i.status, ['sent', 'paid']), gte(i.issueDate, from), lte(i.issueDate, to)))
+      .get(),
+    db
+      .select({ cents: sql<number>`coalesce(sum(${i.totalCents}), 0)`, n: sql<number>`count(*)` })
+      .from(i)
+      .where(and(eq(i.status, 'paid'), gte(i.paidDate, from), lte(i.paidDate, to)))
+      .get(),
+  ]);
+  return {
+    from,
+    invoicedCents: invoiced?.cents ?? 0,
+    invoicedCount: invoiced?.n ?? 0,
+    collectedCents: collected?.cents ?? 0,
+    collectedCount: collected?.n ?? 0,
+  };
+}
+
+/** The latest payments, newest first, with the client's name. */
+export function recentPayments(limit = 5) {
+  const i = schema.invoice;
+  return getDb()
+    .select({ invoice: i, clientName: schema.user.name, clientImage: schema.user.image })
+    .from(i)
+    .innerJoin(schema.user, eq(i.clientId, schema.user.id))
+    .where(eq(i.status, 'paid'))
+    .orderBy(desc(i.paidDate), desc(i.updatedAt))
+    .limit(limit)
+    .all();
 }
