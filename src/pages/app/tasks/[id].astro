@@ -9,6 +9,8 @@ import { field } from '../../../lib/auth-helpers';
 import { CLIENT_VISIBLE_STATUSES, taskStatus } from '../../../lib/projects';
 import { addComment, taskComments } from '../../../lib/work';
 import { getDb, schema } from '../../../db';
+import { inBackground } from '../../../lib/email';
+import { notifyTaskComment } from '../../../lib/notify';
 
 const user = Astro.locals.user!; // guaranteed by src/middleware.ts
 const id = Astro.params.id ?? '';
@@ -37,6 +39,7 @@ if (Astro.request.method === 'POST') {
   else {
     draft = field(form, 'body');
     error = (await addComment(id, user.id, draft)) ?? '';
+    if (!error) await inBackground(Astro.locals, notifyTaskComment(id, user.id, draft, Astro.url.origin));
   }
   if (!error) return Astro.redirect(`/app/tasks/${id}#comments`, 303);
   Astro.response.status = 400;

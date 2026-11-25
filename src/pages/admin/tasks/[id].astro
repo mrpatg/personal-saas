@@ -27,6 +27,8 @@ import {
 } from '../../../lib/work';
 import { getDb, schema } from '../../../db';
 import { invoiceNumber, invoiceRefs } from '../../../lib/invoices';
+import { inBackground } from '../../../lib/email';
+import { notifyTaskComment } from '../../../lib/notify';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
 const db = getDb();
@@ -78,6 +80,7 @@ if (Astro.request.method === 'POST') {
   } else if (intent === 'comment') {
     commentDraft = field(form, 'body');
     error = (await addComment(id, admin.id, commentDraft)) ?? '';
+    if (!error) await inBackground(Astro.locals, notifyTaskComment(id, admin.id, commentDraft, Astro.url.origin));
     anchor = 'comments';
   } else if (intent === 'add-time') {
     timeDraft = {
