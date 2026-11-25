@@ -116,6 +116,9 @@ const clients = await db
   .all();
 
 const mailOn = emailEnabled();
+// Reopen the Add client pop-up when creating failed (keeps what was typed), or via ?add=1.
+const openAdd = (Astro.request.method === 'POST' && draft.name && Astro.response.status === 400) || Astro.url.searchParams.has('add');
+const plusIcon = 'M12 5v14M5 12h14';
 const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 ---
 
@@ -125,10 +128,13 @@ const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric
       <p class="text-sm text-muted">Admin</p>
       <h1 class="font-display text-4xl sm:text-5xl">Clients</h1>
     </div>
-    <Button href="#add-client" variant="secondary">Add a client</Button>
+    <Button href="?add=1" data-open-dialog="add-client" aria-haspopup="dialog">
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d={plusIcon} /></svg>
+      Add client
+    </Button>
   </div>
 
-  {error && <p role="alert" class="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+  {error && !openAdd && <p role="alert" class="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
   {notice && <p role="status" class="mt-6 rounded-2xl bg-primary-soft px-4 py-3 text-sm text-primary">{notice}</p>}
 
   {credentials && (
@@ -150,7 +156,7 @@ const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric
   <section class="mt-10">
     {clients.length === 0 ? (
       <Card>
-        <p class="text-muted">No clients yet. Add your first one below.</p>
+        <p class="text-muted">No clients yet. <a href="?add=1" data-open-dialog="add-client" class="text-primary hover:underline">Add your first one</a>.</p>
       </Card>
     ) : (
       <ul class="space-y-3">
@@ -206,10 +212,24 @@ const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric
     )}
   </section>
 
-  <!-- Add client -->
-  <section id="add-client" class="mt-12 scroll-mt-24">
-    <Card class="max-w-2xl">
-      <h2 class="font-display text-3xl">Add a client</h2>
+  <!-- Add client (pop-up; opened by the "Add client" button) -->
+  <dialog
+    id="add-client"
+    aria-labelledby="add-client-title"
+    data-autoopen={openAdd ? '' : undefined}
+    open={openAdd}
+    class="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-3xl bg-surface p-0 text-ink shadow-lift ring-1 ring-line backdrop:bg-ink/40 backdrop:backdrop-blur-sm"
+  >
+    <div class="p-6 sm:p-8">
+      <div class="flex items-start justify-between gap-4">
+        <h2 id="add-client-title" class="font-display text-3xl">Add a client</h2>
+        <form method="dialog">
+          <button type="submit" formnovalidate class="-m-2 rounded-full p-2 text-muted transition hover:bg-primary-soft hover:text-ink" aria-label="Close">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          </button>
+        </form>
+      </div>
+      {error && openAdd && <p role="alert" class="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
       <p class="mt-1 text-sm text-muted">
         {mailOn ? 'They get an email to choose their own password, or you can set one and send it yourself.' : 'They can sign in right away with the email and password you give them.'}
       </p>
@@ -237,10 +257,38 @@ const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric
           Temporary password <span class="font-normal text-muted">({mailOn ? 'only used without an invite; ' : ''}leave blank to generate one)</span>
           <input type="text" name="password" minlength="10" autocomplete="off" class={input} />
         </label>
-        <div class="sm:col-span-2">
+        <div class="flex flex-wrap gap-3 sm:col-span-2">
           <Button type="submit">Create client account</Button>
+          <Button type="submit" variant="ghost" formmethod="dialog" formnovalidate>Cancel</Button>
         </div>
       </form>
-    </Card>
-  </section>
+    </div>
+  </dialog>
 </AppLayout>
+
+<script>
+  // Open the pop-up in place instead of following the ?add=1 link (which still works without JavaScript).
+  const dialog = document.getElementById('add-client') as HTMLDialogElement | null;
+  if (dialog) {
+    for (const el of document.querySelectorAll<HTMLElement>('[data-open-dialog="add-client"]')) {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        dialog.showModal();
+        dialog.querySelector<HTMLInputElement>('input[name="name"]')?.focus();
+      });
+    }
+    // Server-rendered open (after a failed create, or ?add=1): reopen as a proper modal.
+    if (dialog.hasAttribute('data-autoopen')) {
+      dialog.close();
+      dialog.showModal();
+    }
+    // Clicking the dimmed backdrop closes it.
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) dialog.close();
+    });
+    // Drop ?add=1 so a refresh doesn't reopen it.
+    dialog.addEventListener('close', () => {
+      if (location.search.includes('add=1')) history.replaceState(null, '', location.pathname);
+    });
+  }
+</script>
