@@ -5,9 +5,10 @@
 # Better Auth: signs session cookies. Generate with: openssl rand -base64 32
 BETTER_AUTH_SECRET=replace-me-with-a-long-random-string
 
-# Stripe (payments feature)
-# STRIPE_SECRET_KEY=
-# STRIPE_WEBHOOK_SECRET=
+# Stripe (online invoice payments). Use test-mode keys (sk_test_…) locally.
+# Without STRIPE_SECRET_KEY the "Pay now" button is hidden.
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
 
 # Resend (email). Without it, emails are skipped and logged instead of sent.
 RESEND_API_KEY=
