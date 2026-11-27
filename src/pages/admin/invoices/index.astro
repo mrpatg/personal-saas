@@ -19,13 +19,18 @@ import {
   invoiceName,
   invoiceNumber,
   invoiceStatus,
+  isMoneyPeriod,
   listInvoices,
+  MONEY_PERIODS,
+  moneySummary,
   outstanding,
+  recentPayments,
   todayISO,
   unbilledByProject,
   type InvoiceDisplayStatus,
 } from '../../../lib/invoices';
 import { getDb, schema } from '../../../db';
+import Avatar from '../../../components/ui/Avatar.astro';
 import { logActivity } from '../../../lib/activity';
 
 const admin = Astro.locals.user!; // guaranteed by src/middleware.ts
@@ -74,6 +79,17 @@ const rows = (await listInvoices()).filter(({ invoice: inv }) => {
   return filter ? inv.status === filter : true;
 });
 const owed = await outstanding();
+const periodParam = Astro.url.searchParams.get('period') ?? 'month';
+const period = isMoneyPeriod(periodParam) ? periodParam : 'month';
+const [money, payments] = await Promise.all([moneySummary(period), recentPayments(5)]);
+/** Keeps the status filter when switching period, and vice versa. */
+const linkWith = (changes: Record<string, string>) => {
+  const q = new URLSearchParams(Astro.url.searchParams);
+  for (const [k, v] of Object.entries(changes)) v ? q.set(k, v) : q.delete(k);
+  const s = q.toString();
+  return `/admin/invoices${s ? `?${s}` : ''}`;
+};
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const totalUnbilled = [...unbilled.values()].reduce((a, b) => a + b, 0);
 const clientLabel = (c: { name: string; company: string | null }) => (c.company ? `${c.name} (${c.company})` : c.name);
 ---
@@ -89,25 +105,78 @@ const clientLabel = (c: { name: string; company: string | null }) => (c.company 
 
   {error && <p role="alert" class="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
 
-  <div class="mt-8 grid grid-cols-2 gap-3 sm:max-w-2xl sm:grid-cols-3 sm:gap-4">
-    <Card>
-      <p class="text-sm text-muted">Outstanding</p>
-      <p class="mt-2 font-display text-3xl">{formatMoney(owed.dueCents)}</p>
-    </Card>
-    <Card>
-      <p class="text-sm text-muted">Overdue</p>
-      <p class={`mt-2 font-display text-3xl ${owed.overdueCents ? 'text-rose-700' : ''}`}>{formatMoney(owed.overdueCents)}</p>
-    </Card>
-    <Card class="col-span-2 sm:col-span-1">
-      <p class="text-sm text-muted">Not yet invoiced</p>
-      <p class="mt-2 font-display text-3xl">{formatMoney(totalUnbilled)}</p>
-    </Card>
-  </div>
+  <!-- Money summary -->
+  <section class="mt-8" aria-labelledby="money-title">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h2 id="money-title" class="sr-only">Money</h2>
+      <nav class="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1" aria-label="Period">
+        {Object.entries(MONEY_PERIODS).map(([key, label]) => (
+          <a
+            href={linkWith({ period: key === 'month' ? '' : key })}
+            aria-current={period === key ? 'page' : undefined}
+            class={`shrink-0 rounded-full px-3.5 py-1.5 text-sm whitespace-nowrap transition ${period === key ? 'bg-ink text-canvas' : 'text-muted hover:text-ink'}`}
+          >{label}</a>
+        ))}
+      </nav>
+    </div>
+    <div class="mt-3 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <Card>
+        <p class="text-sm text-muted">Collected</p>
+        <p class="mt-2 font-display text-3xl text-primary">{formatMoney(money.collectedCents)}</p>
+        <p class="mt-1 text-xs text-muted">{plural(money.collectedCount, 'payment')}</p>
+      </Card>
+      <Card>
+        <p class="text-sm text-muted">Invoiced</p>
+        <p class="mt-2 font-display text-3xl">{formatMoney(money.invoicedCents)}</p>
+        <p class="mt-1 text-xs text-muted">{plural(money.invoicedCount, 'invoice')} sent</p>
+      </Card>
+      <a href={linkWith({ status: 'open' })} class="block rounded-3xl transition hover:-translate-y-0.5">
+        <Card class="h-full">
+          <p class="text-sm text-muted">Due now</p>
+          <p class="mt-2 font-display text-3xl">{formatMoney(owed.dueCents)}</p>
+          <p class={`mt-1 text-xs ${owed.overdueCents ? 'text-rose-700' : 'text-muted'}`}>
+            {owed.overdueCents ? `${formatMoney(owed.overdueCents)} overdue` : plural(owed.count, 'invoice') + ' open'}
+          </p>
+        </Card>
+      </a>
+      <Card>
+        <p class="text-sm text-muted">Not yet invoiced</p>
+        <p class="mt-2 font-display text-3xl">{formatMoney(totalUnbilled)}</p>
+        <p class="mt-1 text-xs text-muted">Logged time and costs</p>
+      </Card>
+    </div>
+    <p class="mt-2 px-1 text-xs text-muted">Collected counts payments by the date they arrived; Invoiced counts invoices by issue date. Due now and Not yet invoiced are as of today.</p>
+  </section>
+
+  <!-- Recent payments -->
+  <section class="mt-8 max-w-3xl" aria-labelledby="payments-title">
+    <h2 id="payments-title" class="font-display text-2xl">Recent payments</h2>
+    {payments.length === 0 ? (
+      <Card class="mt-3"><p class="text-sm text-muted">No payments yet. Paid invoices show up here, whether paid online or marked by hand.</p></Card>
+    ) : (
+      <Card padded={false} class="mt-3 overflow-hidden">
+        <ul class="divide-y divide-line">
+          {payments.map(({ invoice: inv, clientName, clientImage }) => (
+            <li>
+              <a href={`/admin/invoices/${inv.id}`} class="flex items-center gap-3 px-5 py-3 transition hover:bg-primary-soft/50 sm:px-7">
+                <Avatar name={clientName} src={clientImage} size="sm" />
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-medium">{clientName}</p>
+                  <p class="truncate text-xs text-muted">{invoiceNumber(inv)} · {formatDate(inv.paidDate)} · {inv.paidVia === 'stripe' ? 'Paid online' : 'Marked paid'}</p>
+                </div>
+                <span class="shrink-0 font-medium text-primary tabular-nums">+{formatMoney(inv.totalCents)}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    )}
+  </section>
 
   <nav class="mt-10 flex flex-wrap gap-2" aria-label="Filter invoices">
     {filters.map((f) => (
       <a
-        href={f.key ? `/admin/invoices?status=${f.key}` : '/admin/invoices'}
+        href={linkWith({ status: f.key })}
         aria-current={filter === f.key ? 'page' : undefined}
         class={`rounded-full px-4 py-1.5 text-sm transition ${filter === f.key ? 'bg-primary text-primary-foreground' : 'text-muted ring-1 ring-line hover:text-ink'}`}
       >{f.label}</a>

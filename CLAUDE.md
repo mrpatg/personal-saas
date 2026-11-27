@@ -143,6 +143,23 @@ drizzle.config.ts     # drizzle-kit config
   a client's name, company, email and photo from the Edit link on
   `/admin/clients` (`?edit=<id>` opens the pop-up); every change is logged
   with the before and after values.
+- **Regression tests** (`tests/portal.spec.ts`, Playwright). `npm test`
+  builds the site, starts it with `scripts/test-server.mjs` on an empty
+  throwaway database (`.wrangler/test-state`) and walks through every main
+  feature in order: setup, clients, projects, comments, time, invoices, the
+  Stripe webhook, the activity log, money totals and 375px layout. GitHub
+  Actions (`.github/workflows/tests.yml`) runs the type check and the tests on
+  every pull request. **Add a test for every new feature**, and run
+  `npm test` before opening a PR. In a sandbox with its own Chromium, set
+  `PW_CHROMIUM_PATH`.
+- **Status page** (`/admin/status`, JSON at `/admin/status.json`,
+  `src/lib/status.ts`) checks the live setup: database, migrations, sign-in
+  secret and host, Resend key and sender domain, Stripe key and mode, the
+  webhook destination and events, and failures in the last 7 days.
+- **Money totals** on `/admin/invoices`: Collected (paid invoices by paid
+  date), Invoiced (sent or paid invoices by issue date) for Today, Week, Month,
+  YTD or All time, plus Due now, Not yet invoiced and Recent payments. Dates
+  use `site.timeZone` (`todayISO()`).
 - After changing `wrangler.jsonc`, run `npm run cf-typegen` to refresh
   `worker-configuration.d.ts`.
 - Small commits with clear messages, one working step at a time.
@@ -163,6 +180,7 @@ drizzle.config.ts     # drizzle-kit config
 | Apply migrations to local D1 | `npm run db:migrate:local` |
 | Apply migrations to production D1 | `npm run db:migrate:remote` |
 | Regenerate binding types | `npm run cf-typegen` |
+| Regression tests (build, fresh local DB, real browser) | `npm test` |
 
 Health check: `GET /health` returns `{"status":"ok","db":"ok","migrated":true}`.
 If any file in `migrations/` hasn't been applied, it returns 503 with

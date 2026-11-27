@@ -1,26 +1,17 @@
 import type { APIRoute } from 'astro';
-import { sql } from 'drizzle-orm';
-import { getDb } from '../db';
-import journal from '../../migrations/meta/_journal.json';
+import { migrationStatus } from '../lib/status';
 
 /**
  * GET /health — confirms the Worker is running, can reach D1, and that every
  * migration in migrations/ has been applied to this database.
  * Returns 200 {"status":"ok","db":"ok","migrated":true}. If migrations are
  * missing it returns 503 with "migrated":false and the "pending" files.
+ * The admin Status page (/admin/status) runs fuller checks.
  */
 export const GET: APIRoute = async () => {
   const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
   try {
-    const db = getDb();
-    // Wrangler records applied migrations in d1_migrations (name = "0001_auth.sql").
-    const hasTable = await db.all<{ name: string }>(
-      sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'd1_migrations'`,
-    );
-    const applied = hasTable.length
-      ? new Set((await db.all<{ name: string }>(sql`SELECT name FROM d1_migrations`)).map((r) => r.name))
-      : new Set<string>();
-    const pending = journal.entries.map((e) => `${e.tag}.sql`).filter((name) => !applied.has(name));
+    const { pending } = await migrationStatus();
     const migrated = pending.length === 0;
     return new Response(
       JSON.stringify(migrated ? { status: 'ok', db: 'ok', migrated } : { status: 'error', db: 'ok', migrated, pending }),
