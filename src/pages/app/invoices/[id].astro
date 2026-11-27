@@ -48,6 +48,13 @@ if (Astro.request.method === 'POST') {
     } catch (err) {
       console.error('Checkout failed', err);
       error = err instanceof PaymentError ? err.message : 'We couldn’t start the payment. Please try again in a moment.';
+      // Keep Stripe's own reason for the admin (invoice History, Activity and Status pages).
+      if (!(err instanceof PaymentError))
+        await logActivity(
+          user,
+          { action: 'invoice.checkout_failed', summary: `Couldn’t start a Stripe payment for ${invoiceNumber(inv)}: ${err instanceof Error ? err.message : String(err)}`, subjectType: 'invoice', subjectId: inv.id, clientId: inv.clientId },
+          Astro.request,
+        );
     }
     if (url) return Astro.redirect(url, 303);
   }

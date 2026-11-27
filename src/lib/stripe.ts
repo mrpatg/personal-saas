@@ -78,11 +78,19 @@ export interface CheckoutSession {
  */
 export async function checkoutUrlFor(inv: Invoice, clientEmail: string, origin: string): Promise<string> {
   if (inv.status !== 'sent') throw new PaymentError('This invoice isn’t awaiting payment.');
-  if (inv.stripeCheckoutSessionId) {
-    const existing = await stripe<CheckoutSession>('GET', `/checkout/sessions/${inv.stripeCheckoutSessionId}`);
+  // Reuse the invoice's open session if it still exists. A session from another Stripe mode
+  // (e.g. a test session after switching to live keys) can't be found; then start fresh.
+  const existing = inv.stripeCheckoutSessionId
+    ? await stripe<CheckoutSession>('GET', `/checkout/sessions/${encodeURIComponent(inv.stripeCheckoutSessionId)}`).catch(() => null)
+    : null;
+  if (existing) {
     if (existing.status === 'complete') {
       await applyCheckoutSession(existing);
-      throw new PaymentError('This invoice has already been paid.');
+      throw new PaymentError(
+        existing.payment_status === 'paid'
+          ? 'This invoice has already been paid.'
+          : 'A payment for this invoice is already processing. Bank payments can take a few days to clear.',
+      );
     }
     if (existing.status === 'open' && existing.url && existing.amount_total === inv.totalCents) return existing.url;
   }
