@@ -133,11 +133,20 @@ export async function runChecks(origin: string): Promise<Check[]> {
 
     safely('stripe', 'Payments (Stripe)', async () => {
       if (!stripeEnabled()) return { state: 'off', detail: 'STRIPE_SECRET_KEY isn’t set, so clients don’t see “Pay now”.', fix: 'Run: npx wrangler secret put STRIPE_SECRET_KEY' };
+      const key = env.STRIPE_SECRET_KEY ?? '';
+      // Common copy-paste mistakes, spotted without calling Stripe.
+      if (/^pk_/.test(key)) return { state: 'fail', detail: 'STRIPE_SECRET_KEY holds the publishable key (pk_…), not the secret key.', fix: 'Copy the Secret key (sk_live_… or sk_test_…) from Stripe → Developers → API keys and run: npx wrangler secret put STRIPE_SECRET_KEY' };
+      if (key !== key.trim() || /\s|["']/.test(key)) return { state: 'fail', detail: 'STRIPE_SECRET_KEY contains spaces, line breaks or quotes from pasting.', fix: 'Paste just the key: npx wrangler secret put STRIPE_SECRET_KEY' };
+      if (!/^(sk|rk)_(live|test)_/.test(key)) return { state: 'fail', detail: `STRIPE_SECRET_KEY doesn’t look like a Stripe secret key (it starts “${key.slice(0, 5)}…”).`, fix: 'Copy the Secret key from Stripe → Developers → API keys and run: npx wrangler secret put STRIPE_SECRET_KEY' };
       const mode = stripeTestMode() ? 'test mode' : 'live mode';
       const headers = { authorization: `Bearer ${env.STRIPE_SECRET_KEY}` };
       try {
         const res = await timed(fetch('https://api.stripe.com/v1/balance', { headers }));
-        if (!res.ok) return { state: 'fail', detail: `Stripe rejected the secret key (${res.status}).`, fix: 'Set the right key: npx wrangler secret put STRIPE_SECRET_KEY' };
+        if (!res.ok) {
+          const reason = ((await res.json().catch(() => ({}))) as { error?: { message?: string } }).error?.message;
+          if (res.status === 403 && key.startsWith('rk_')) return { state: 'warn', detail: `This is a restricted key (${mode}) that can’t read the balance, so it couldn’t be fully checked.`, fix: 'Use the standard Secret key (sk_…), or give the restricted key write access to Checkout Sessions and read access to Balance and Webhook Endpoints.' };
+          return { state: 'fail', detail: `Stripe rejected the secret key (${res.status})${reason ? `: ${reason}` : '.'}`, fix: 'Copy the Secret key from Stripe → Developers → API keys (same account and mode as the webhook) and run: npx wrangler secret put STRIPE_SECRET_KEY' };
+        }
       } catch (err) {
         return { state: 'warn', detail: `Couldn’t reach Stripe: ${message(err)}.` };
       }
@@ -171,12 +180,12 @@ export async function runChecks(origin: string): Promise<Check[]> {
       const rows = await db
         .select({ action: l.action, n: sql<number>`count(*)` })
         .from(l)
-        .where(and(gte(l.createdAt, since), inArray(l.action, ['invoice.email_failed', 'client.invite_failed', 'invoice.payment_failed', 'invoice.paid_while_void', 'user.sign_in_failed'])))
+        .where(and(gte(l.createdAt, since), inArray(l.action, ['invoice.email_failed', 'client.invite_failed', 'invoice.payment_failed', 'invoice.paid_while_void', 'invoice.checkout_failed', 'user.sign_in_failed'])))
         .groupBy(l.action)
         .all();
       const count = (a: string) => rows.find((r) => r.action === a)?.n ?? 0;
       const emails = count('invoice.email_failed') + count('client.invite_failed');
-      const payments = count('invoice.payment_failed') + count('invoice.paid_while_void');
+      const payments = count('invoice.payment_failed') + count('invoice.paid_while_void') + count('invoice.checkout_failed');
       const signins = count('user.sign_in_failed');
       const parts = [
         emails && `${emails} failed email${emails === 1 ? '' : 's'}`,
